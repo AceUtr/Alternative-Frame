@@ -1,0 +1,24 @@
+# Local tooling and caches
+.agents/
+.pytest_cache/
+.vscode/
+tmp/
+word/
+node_modules/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Independent reference repository (contains its own history and local API config)
+autoresearch-master/
+
+# Generated runtime files
+coverage/
+dist/
+*.log
+__pycache__/
+*.py[cod]

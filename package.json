@@ -1,0 +1,14 @@
+{
+  "name": "requirements-analysis-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types src/app.ts",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "check": "npm run test && node --experimental-strip-types src/check.ts"
+  },
+  "engines": {
+    "node": ">=22.6"
+  }
+}
