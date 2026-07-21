@@ -6,7 +6,15 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from core.models import SubTask
 from core.tool_calling_agent import ToolCallingAgent
 from core.tools import FileEditor, ToolRegistry
-from ui import build_tool_test_plan, prepare_repair_fixture
+from core.long_horizon import GoalEvaluation, LongHorizonState
+from core.planning import PlanningPipeline
+from ui import (
+    DEFAULT_EXECUTION_MODES,
+    DEVELOPER_EXECUTION_MODES,
+    build_recovery_plan,
+    build_tool_test_plan,
+    prepare_repair_fixture,
+)
 
 
 class FakeToolCallingClient:
@@ -53,6 +61,9 @@ def test_tool_agent_writes_inside_workspace_and_emits_events(tmp_path):
 
     assert result.status == "success"
     assert (tmp_path / "hello.py").read_text(encoding="utf-8").endswith("return a + b\n")
+    assert result.artifacts == ["hello.py"]
+    assert result.tool_records[0]["tool"] == "file_editor"
+    assert result.tool_records[0]["metadata"]["artifacts"] == ["hello.py"]
     assert [event for event, _ in events] == ["tool_started", "tool_finished"]
     assert events[-1][1]["success"] is True
 
@@ -72,3 +83,19 @@ def test_repair_fixture_is_reset_to_a_known_failure(tmp_path):
     namespace = {}
     exec((tmp_path / "hello.py").read_text(encoding="utf-8"), namespace)
     assert namespace["add"](2, 3) == -1
+
+
+def test_self_test_modes_are_hidden_from_default_modes():
+    assert "长程任务" in DEFAULT_EXECUTION_MODES
+    assert not set(DEFAULT_EXECUTION_MODES) & set(DEVELOPER_EXECUTION_MODES)
+
+
+def test_recovery_plan_includes_previous_global_evaluation():
+    state = LongHorizonState("run", "software task", max_phases=3, max_total_tasks=20, phase=1)
+    evaluation = GoalEvaluation(False, "tests failed", failures=["tests: exit_code=1"])
+
+    plan = build_recovery_plan(PlanningPipeline(), state, evaluation)
+
+    assert plan.subtasks
+    assert all("tests failed" in task.description for task in plan.subtasks)
+    assert all("tests: exit_code=1" in task.description for task in plan.subtasks)

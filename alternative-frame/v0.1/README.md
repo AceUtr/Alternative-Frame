@@ -49,3 +49,26 @@ Get-Content runs\results.jsonl
 ```
 
 这会分别运行科研和软件工程的 stub baseline，并记录任务数、成功数、轮次、重试次数、耗时、模型调用数和人工干预次数。审计结论见 [`docs/code-audit-v0.1.md`](docs/code-audit-v0.1.md)。当前结果明确标记为 `orchestration_only`，不会冒充真实科研/软件交付结果。
+
+## 运行长程控制器 MVP
+
+```powershell
+python run_long_horizon_demo.py
+```
+
+该离线 Demo 会执行两个阶段：第一阶段完成实现，随后全局评估器发现仍缺少独立验证，Replanner 自动生成第二阶段测试与审查任务。状态保存在 `runs/long_horizon/<run_id>/state.json`，事件轨迹保存在同目录的 `events.jsonl`。
+
+如果当前环境不允许写入项目 `runs/` 目录，可显式指定状态目录：
+
+```powershell
+$env:LONG_HORIZON_RUNS_DIR = "$env:TEMP\alternative-frame-long-horizon"
+python run_long_horizon_demo.py
+```
+
+实现与边界说明见 [`docs/milestone-3-long-horizon-mvp.md`](docs/milestone-3-long-horizon-mvp.md)。
+
+UI 的任务模式默认提供“标准多 Agent”和“长程任务”。“工具调用自检”和“失败修复自检”作为开发诊断能力保留在“开发者模式”中，不进入默认比赛演示流程。
+
+API 模式下，长程任务的后续阶段由 `StructuredReplanner` 生成严格 JSON DAG，并在执行前校验角色、工具权限、路径、依赖、循环和剩余预算。本地 Stub 模式使用规则型恢复计划，确保离线可演示。
+
+API 长程模式使用 `StructuredGlobalEvaluator` 判断最终目标：必需文件要有本次运行的产物来源，测试命令必须精确匹配且退出码为 0，硬证据全部通过后才允许模型进行语义覆盖判断。模型返回无效或 API 不可用时采用 fail-closed，不会把任务误判为完成。详见 [`docs/milestone-4-global-completion.md`](docs/milestone-4-global-completion.md)。

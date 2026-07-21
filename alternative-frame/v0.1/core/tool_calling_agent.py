@@ -48,14 +48,14 @@ class ToolCallingAgent(Agent):
             "4. Never repeat the same tool call with identical arguments unless the previous result failed and you changed the plan."
         )
         messages = [{"role": "system", "content": self.system_prompt + protocol}, {"role": "user", "content": json.dumps({"task": task.description, "acceptance": task.acceptance, "dependencies": {k: v.summary for k, v in context.items()},}, ensure_ascii=False)}]
-        evidence, artifacts = [], []
+        evidence, artifacts, tool_records = [], [], []
         call_counts = {}
         for step in range(self.max_steps):
             response = self.client.chat(messages, tools=self.tools.schemas())
             tool_calls = response.get("tool_calls", []) if isinstance(response, dict) else []
             if not tool_calls:
                 content = response.get("content", "") if isinstance(response, dict) else str(response)
-                return AgentResult(task.id, "success", summary=content, artifacts=artifacts, evidence=evidence + [f"model_step={step + 1}"], started_at=started, finished_at=utc_now())
+                return AgentResult(task.id, "success", summary=content, artifacts=artifacts, evidence=evidence + [f"model_step={step + 1}"], tool_records=tool_records, started_at=started, finished_at=utc_now())
             messages.append({"role": "assistant", "content": response.get("content", ""), "tool_calls": tool_calls})
             for call in tool_calls:
                 name = call.get("function", {}).get("name", "")
@@ -82,7 +82,7 @@ class ToolCallingAgent(Agent):
                 signature = name + ":" + json.dumps(args, ensure_ascii=False, sort_keys=True)
                 call_counts[signature] = call_counts.get(signature, 0) + 1
                 if call_counts[signature] >= 3:
-                    return AgentResult(task.id, "failed", summary="repeated identical tool call detected", evidence=evidence, failures=["repeated_tool_call"], started_at=started, finished_at=utc_now())
+                    return AgentResult(task.id, "failed", summary="repeated identical tool call detected", evidence=evidence, tool_records=tool_records, failures=["repeated_tool_call"], started_at=started, finished_at=utc_now())
                 event_payload = {
                     "task_id": task.id,
                     "role": self.role,
@@ -95,6 +95,17 @@ class ToolCallingAgent(Agent):
                 result = self.tools.execute(name, args)
                 result.duration_seconds = time.perf_counter() - tool_started
                 evidence.append(f"tool={name};success={result.success}")
+                tool_records.append(
+                    {
+                        "tool": name,
+                        "arguments": args,
+                        "success": result.success,
+                        "exit_code": result.exit_code,
+                        "duration_seconds": result.duration_seconds,
+                        "metadata": dict(result.metadata),
+                        "output_excerpt": (result.output or result.error or "")[:1000],
+                    }
+                )
                 if result.success and result.metadata.get("artifacts"):
                     artifacts.extend(result.metadata["artifacts"])
                 self._emit_tool_event(
@@ -109,4 +120,4 @@ class ToolCallingAgent(Agent):
                     },
                 )
                 messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": json.dumps(result.__dict__, ensure_ascii=False)})
-        return AgentResult(task.id, "failed", summary=f"tool calling max steps exceeded ({self.max_steps})", evidence=evidence, failures=["max_tool_steps_exceeded"], started_at=started, finished_at=utc_now())
+        return AgentResult(task.id, "failed", summary=f"tool calling max steps exceeded ({self.max_steps})", evidence=evidence, tool_records=tool_records, failures=["max_tool_steps_exceeded"], started_at=started, finished_at=utc_now())

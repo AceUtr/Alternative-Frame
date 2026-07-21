@@ -39,6 +39,11 @@ class FileEditor(Tool):
                 return ToolResult(self.name, False, error="content must be a string")
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
-            return ToolResult(self.name, True, output=f"wrote {path.relative_to(self.workspace)}")
+            relative = str(path.relative_to(self.workspace))
+            return ToolResult(
+                self.name,
+                True,
+                output=f"wrote {relative}",
+                metadata={"artifacts": [relative], "action": "write"},
+            )
         return ToolResult(self.name, False, error=f"unsupported action: {action}")
-

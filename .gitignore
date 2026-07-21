@@ -22,3 +22,7 @@ dist/
 *.log
 __pycache__/
 *.py[cod]
+
+# Long-horizon runtime state (keep the directory, not individual runs)
+alternative-frame/v0.1/runs/long_horizon/*
+!alternative-frame/v0.1/runs/long_horizon/.gitkeep

@@ -19,9 +19,9 @@ class TestRunner(Tool):
     def execute(self, arguments: Dict[str, Any]) -> ToolResult:
         command = arguments.get("command", "pytest -q")
         result = self.shell.execute({"command": command})
+        result.tool = self.name
         passed = result.success
         match = re.search(r"(\d+)\s+passed", result.output)
         failed = re.search(r"(\d+)\s+failed", result.output)
-        result.metadata.update({"passed": passed, "passed_count": int(match.group(1)) if match else 0, "failed_count": int(failed.group(1)) if failed else (0 if passed else 1)})
+        result.metadata.update({"command": command, "passed": passed, "passed_count": int(match.group(1)) if match else 0, "failed_count": int(failed.group(1)) if failed else (0 if passed else 1)})
         return result
-

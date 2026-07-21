@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import tkinter as tk
@@ -11,6 +12,14 @@ from typing import Dict
 
 from core.agents import AgentRegistry, DeterministicAgent
 from core.acceptance import AcceptanceEvaluator
+from core.long_horizon import (
+    AcceptanceContract,
+    LongHorizonController,
+    LongHorizonStore,
+    ReportStatusEvaluator,
+    StructuredGlobalEvaluator,
+    StructuredReplanner,
+)
 from core.tool_calling_agent import ToolCallingAgent
 from core.main_agent import MainAgent
 from core.model_client import ModelConfig, OpenAICompatibleClient
@@ -38,6 +47,8 @@ COLORS = {
 
 PROJECT_DIR = Path(__file__).resolve().parent
 TOOL_TEST_WORKSPACE = PROJECT_DIR / "tool_test_workspace"
+DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务")
+DEVELOPER_EXECUTION_MODES = ("工具调用自检", "失败修复自检")
 
 
 def build_registry(client=None, workspace=None, on_tool_event=None, tool_test: bool = False) -> AgentRegistry:
@@ -117,6 +128,18 @@ def prepare_repair_fixture(workspace: Path = TOOL_TEST_WORKSPACE) -> None:
         '    return a - b\n',
         encoding="utf-8",
     )
+
+
+def build_recovery_plan(pipeline: PlanningPipeline, state, evaluation) -> Plan:
+    plan = pipeline.build(state.goal)
+    failure_context = "; ".join(evaluation.failures) or "no structured failure code"
+    recovery_note = (
+        f"\nRecovery phase {state.phase + 1}. Previous global evaluation: {evaluation.reason}. "
+        f"Failures: {failure_context}. Inspect existing artifacts and change strategy before retrying."
+    )
+    for task in plan.subtasks:
+        task.description += recovery_note
+    return plan
 
 
 class FreshUI(tk.Tk):
@@ -202,17 +225,35 @@ class FreshUI(tk.Tk):
         actions = tk.Frame(inner, bg=COLORS["card"])
         actions.pack(fill=tk.X, pady=(10, 0))
         self.execution_mode = tk.StringVar(value="标准多 Agent")
-        mode_box = ttk.Combobox(
+        self.execution_mode_box = ttk.Combobox(
             actions,
             textvariable=self.execution_mode,
             state="readonly",
-            values=["标准多 Agent", "工具调用自检", "失败修复自检"],
+            values=DEFAULT_EXECUTION_MODES,
             width=16,
         )
-        mode_box.pack(side=tk.LEFT)
-        mode_box.bind("<<ComboboxSelected>>", self._on_execution_mode_changed)
+        self.execution_mode_box.pack(side=tk.LEFT)
+        self.execution_mode_box.bind("<<ComboboxSelected>>", self._on_execution_mode_changed)
+        self.developer_mode = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            actions,
+            text="开发者模式",
+            variable=self.developer_mode,
+            command=self._toggle_developer_modes,
+            bg=COLORS["card"],
+            fg=COLORS["muted"],
+            activebackground=COLORS["card"],
+            selectcolor=COLORS["card"],
+            font=("Microsoft YaHei UI", 9),
+        ).pack(side=tk.LEFT, padx=(10, 0))
         self.run_btn = ttk.Button(actions, text="开始协作  →", style="Accent.TButton", command=self.start_run)
         self.run_btn.pack(side=tk.RIGHT)
+
+    def _toggle_developer_modes(self):
+        values = DEFAULT_EXECUTION_MODES + DEVELOPER_EXECUTION_MODES if self.developer_mode.get() else DEFAULT_EXECUTION_MODES
+        self.execution_mode_box.configure(values=values)
+        if self.execution_mode.get() not in values:
+            self.execution_mode.set(DEFAULT_EXECUTION_MODES[0])
 
     def _on_execution_mode_changed(self, _event=None):
         mode = self.execution_mode.get()
@@ -334,13 +375,13 @@ class FreshUI(tk.Tk):
         self._set_state("运行中", COLORS["blue_dark"])
         self.append_log(f"MainAgent ← {goal}")
         execution_mode = self.execution_mode.get()
-        tool_test = execution_mode in ("工具调用自检", "失败修复自检")
-        repair_test = execution_mode == "失败修复自检"
-        threading.Thread(target=self._run_worker, args=(goal, config, tool_test, repair_test), daemon=True).start()
+        threading.Thread(target=self._run_worker, args=(goal, config, execution_mode), daemon=True).start()
 
-    def _run_worker(self, goal, config, tool_test=False, repair_test=False):
+    def _run_worker(self, goal, config, execution_mode):
         try:
             pipeline = PlanningPipeline()
+            tool_test = execution_mode in DEVELOPER_EXECUTION_MODES
+            repair_test = execution_mode == "失败修复自检"
             if tool_test:
                 TOOL_TEST_WORKSPACE.mkdir(parents=True, exist_ok=True)
                 if repair_test:
@@ -350,13 +391,15 @@ class FreshUI(tk.Tk):
                 domain = "tool_call_self_test"
                 workspace = TOOL_TEST_WORKSPACE
             else:
-                intent = pipeline.intent_parser.parse(goal)
-                drafts = pipeline.decomposer.decompose(intent)
-                drafts = pipeline.acceptance_generator.generate(intent, drafts)
-                plan = pipeline.planner.build(intent, drafts)
-                domain = intent.domain
                 workspace = PROJECT_DIR
-            self.events.put(("plan", (domain, plan)))
+                if execution_mode == "标准多 Agent":
+                    intent = pipeline.intent_parser.parse(goal)
+                    drafts = pipeline.decomposer.decompose(intent)
+                    drafts = pipeline.acceptance_generator.generate(intent, drafts)
+                    plan = pipeline.planner.build(intent, drafts)
+                    domain = intent.domain
+            if execution_mode != "长程任务":
+                self.events.put(("plan", (domain, plan)))
             client = OpenAICompatibleClient(config) if config else None
 
             def on_tool_event(event, payload):
@@ -373,9 +416,53 @@ class FreshUI(tk.Tk):
                 self.events.put(("task_event", (event, task.id, result)))
 
             evaluator = AcceptanceEvaluator(workspace=workspace, execute_commands=tool_test) if client else None
-            main = MainAgent(Orchestrator(registry, max_workers=4, on_event=on_event, acceptance=evaluator), pipeline.build)
-            report = main.orchestrator.run(plan)
-            self.events.put(("report", report))
+            orchestrator = Orchestrator(registry, max_workers=4, on_event=on_event, acceptance=evaluator)
+            if execution_mode == "长程任务":
+                runs_root = Path(
+                    os.getenv("LONG_HORIZON_RUNS_DIR", str(PROJECT_DIR / "runs" / "long_horizon"))
+                )
+                store = LongHorizonStore(runs_root)
+
+                def on_long_event(event, payload):
+                    self.events.put(("long_horizon_event", (event, payload)))
+
+                if client:
+                    def on_replanner_event(event, payload):
+                        self.events.put(("replanner_event", (event, payload)))
+
+                    replanner = StructuredReplanner(client, on_event=on_replanner_event)
+
+                    def on_global_evaluator_event(event, payload):
+                        self.events.put(("global_evaluator_event", (event, payload)))
+
+                    initial_plan = pipeline.build(goal)
+                    global_evaluator = StructuredGlobalEvaluator(
+                        client=client,
+                        contract=AcceptanceContract.from_plan(goal, initial_plan),
+                        workspace=workspace,
+                        on_event=on_global_evaluator_event,
+                    )
+                else:
+                    replanner = lambda state, evaluation: build_recovery_plan(pipeline, state, evaluation)
+                    initial_plan = pipeline.build(goal)
+                    global_evaluator = ReportStatusEvaluator()
+
+                controller = LongHorizonController(
+                    orchestrator=orchestrator,
+                    initial_planner=lambda _state: initial_plan,
+                    store=store,
+                    evaluator=global_evaluator,
+                    replanner=replanner,
+                    max_phases=3,
+                    max_total_tasks=50,
+                    on_event=on_long_event,
+                )
+                report = controller.run(goal)
+                self.events.put(("long_horizon_report", (report, store.state_path(report.state.run_id))))
+            else:
+                main = MainAgent(orchestrator, pipeline.build)
+                report = main.orchestrator.run(plan)
+                self.events.put(("report", report))
         except Exception as exc:
             self.events.put(("run_error", str(exc)))
 
@@ -404,6 +491,14 @@ class FreshUI(tk.Tk):
                     self._show_task_event(payload)
                 elif kind == "tool_event":
                     self._show_tool_event(payload)
+                elif kind == "long_horizon_event":
+                    self._show_long_horizon_event(payload)
+                elif kind == "long_horizon_report":
+                    self._show_long_horizon_report(payload)
+                elif kind == "replanner_event":
+                    self._show_replanner_event(payload)
+                elif kind == "global_evaluator_event":
+                    self._show_global_evaluator_event(payload)
                 elif kind == "fixture_ready":
                     self.append_log(f"FIXTURE → {payload}")
                 elif kind == "run_error":
@@ -462,6 +557,99 @@ class FreshUI(tk.Tk):
             f"TOOL #{step} · {tool} · {'success' if success else 'failed'} · "
             f"{duration:.3f}s · {self._compact(output, 300)}"
         )
+
+    def _show_long_horizon_event(self, payload):
+        event, detail = payload
+        if event == "run_started":
+            self.append_log("LONG → 长程控制器已启动")
+        elif event == "phase_planned":
+            phase = detail.get("phase", "?")
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+            self.task_items.clear()
+            for task in detail.get("tasks", []):
+                item = self.tree.insert(
+                    "",
+                    tk.END,
+                    values=(
+                        task.get("id", "unknown"),
+                        task.get("role", "unknown"),
+                        ", ".join(task.get("depends_on", [])) or "—",
+                        "等待",
+                        "—",
+                    ),
+                )
+                self.task_items[task.get("id", "unknown")] = item
+            self.append_log(
+                f"PHASE {phase} → 已规划 {len(detail.get('tasks', []))} 个任务 · "
+                f"{detail.get('plan_goal', '')}"
+            )
+            self._set_state(f"长程任务 · 阶段 {phase} 执行中", COLORS["blue_dark"])
+        elif event == "phase_finished":
+            phase = detail.get("phase", "?")
+            verdict = "全局目标完成" if detail.get("completed") else "需要继续规划"
+            self.append_log(f"PHASE {phase} → {verdict} · {detail.get('reason', '')}")
+        elif event == "budget_exhausted":
+            self.append_log(f"LONG → 预算耗尽 · {detail.get('reason', '')}")
+        elif event == "run_failed":
+            self.append_log(f"LONG → 运行失败 · {detail.get('reason', '')}")
+        elif event == "run_completed":
+            self.append_log(f"LONG → 最终目标已通过阶段 {detail.get('phase', '?')} 验收")
+
+    def _show_long_horizon_report(self, payload):
+        report, state_path = payload
+        state = report.state
+        self.append_log(
+            f"LongHorizonController → status={state.status}, phases={state.phase}, "
+            f"tasks={state.total_tasks}"
+        )
+        self.append_log(f"STATE → {state_path}")
+        self.running = False
+        self.run_btn.configure(state=tk.NORMAL)
+        color = COLORS["success"] if state.status == "completed" else COLORS["danger"]
+        self._set_state(f"长程任务 · {state.status} · {state.phase} 阶段", color)
+
+    def _show_replanner_event(self, payload):
+        event, detail = payload
+        if event == "replan_started":
+            self.append_log(
+                f"REPLAN → 模型正在生成阶段 {detail.get('phase', '?')} 的恢复 DAG "
+                f"· attempt={detail.get('attempt', '?')}"
+            )
+        elif event == "replan_validation_failed":
+            self.append_log(
+                f"REPLAN → 计划校验失败 · attempt={detail.get('attempt', '?')} · "
+                f"{self._compact(detail.get('error', ''), 300)}"
+            )
+        elif event == "replan_completed":
+            self.append_log(
+                f"REPLAN → 结构化计划通过校验 · tasks={detail.get('task_count', 0)} · "
+                f"{detail.get('phase_goal', '')}"
+            )
+
+    def _show_global_evaluator_event(self, payload):
+        event, detail = payload
+        if event == "global_hard_gate":
+            verdict = "通过" if detail.get("passed") else "未通过"
+            self.append_log(
+                f"GLOBAL HARD GATE → {verdict} · passed={detail.get('passed_count', 0)} · "
+                f"missing={detail.get('missing_count', 0)}"
+            )
+            for failure in detail.get("failures", [])[:5]:
+                self.append_log(f"  MISSING → {self._compact(failure, 260)}")
+        elif event == "global_semantic_started":
+            self.append_log(
+                f"GLOBAL SEMANTIC → 正在检查最终目标覆盖 · attempt={detail.get('attempt', '?')}"
+            )
+        elif event == "global_semantic_failed":
+            self.append_log(
+                f"GLOBAL SEMANTIC → 返回格式无效 · {self._compact(detail.get('error', ''), 260)}"
+            )
+        elif event == "global_semantic_completed":
+            verdict = "最终目标完成" if detail.get("completed") else "仍有目标缺口"
+            self.append_log(
+                f"GLOBAL SEMANTIC → {verdict} · missing={detail.get('missing_criteria', [])}"
+            )
 
     @staticmethod
     def _compact(value, limit):

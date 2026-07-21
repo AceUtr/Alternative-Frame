@@ -18,7 +18,8 @@ class ExperimentRunner(Tool):
 
     def execute(self, arguments: Dict[str, Any]) -> ToolResult:
         result = self.shell.execute({"command": arguments.get("command", "")})
+        result.tool = self.name
+        result.metadata["command"] = arguments.get("command", "")
         metric_matches = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)", result.output)
         result.metadata["metrics"] = {key: float(value) for key, value in metric_matches}
         return result
-

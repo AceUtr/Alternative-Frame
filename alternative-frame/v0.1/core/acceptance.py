@@ -34,11 +34,19 @@ class AcceptanceEvaluator:
             check_type = check.get("check_type", "manual")
             if check_type == "command":
                 command = check.get("command")
-                tool_evidence = any("tool=test_runner;success=True" in item or "tool=shell_runner;success=True" in item for item in result.evidence)
-                if tool_evidence:
-                    passed.append(f"{check_id}: tool_execution_evidence")
+                expected = self._normalize_command(command)
+                matching_records = [
+                    record
+                    for record in result.tool_records
+                    if record.get("tool") in ("test_runner", "shell_runner")
+                    and self._normalize_command(record.get("arguments", {}).get("command")) == expected
+                    and record.get("success") is True
+                    and record.get("exit_code") == 0
+                ]
+                if matching_records:
+                    passed.append(f"{check_id}: exact_command_exit_code=0")
                 elif not self.execute_commands:
-                    failures.append(f"{check_id}: command_not_executed ({command})")
+                    failures.append(f"{check_id}: exact_command_evidence_missing ({command})")
                 else:
                     ok, detail = self._run_command(command)
                     (passed if ok else failures).append(f"{check_id}: {detail}")
@@ -63,6 +71,10 @@ class AcceptanceEvaluator:
                 else:
                     failures.append(f"{check_id}: evidence_missing")
         return AcceptanceReport(not failures and result.status == "success", passed, failures)
+
+    @staticmethod
+    def _normalize_command(command):
+        return " ".join(str(command or "").split()).strip().lower()
 
     def _run_command(self, command: str):
         try:

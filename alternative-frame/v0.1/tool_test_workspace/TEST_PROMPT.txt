@@ -6,7 +6,7 @@ Complete these actions using the available tools, not by merely describing code:
 1. Read requirements.txt.
 2. Create hello.py and implement add(a, b).
 3. Create test_hello.py with unittest tests.
-4. Run the tests with Python.
+4. Run the tests with this exact command: python -m unittest -v test_hello.py
 5. If a test fails, inspect the error, fix the code, and run the tests again.
 6. Only finish after the real test command exits with code 0.
 

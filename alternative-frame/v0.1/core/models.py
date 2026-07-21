@@ -28,6 +28,7 @@ class AgentResult:
     summary: str = ""
     artifacts: List[str] = field(default_factory=list)
     evidence: List[str] = field(default_factory=list)
+    tool_records: List[Dict[str, Any]] = field(default_factory=list)
     failures: List[str] = field(default_factory=list)
     attempts: int = 1
     started_at: str = field(default_factory=utc_now)
@@ -65,4 +66,3 @@ class Plan:
             visited.add(task_id)
         for task_id in tasks:
             visit(task_id)
-
