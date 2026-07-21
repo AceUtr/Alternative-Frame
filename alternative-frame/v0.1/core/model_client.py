@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -40,6 +41,9 @@ class ModelConfig:
 
 
 class OpenAICompatibleClient:
+    MAX_TRANSIENT_ATTEMPTS = 3
+    RETRY_DELAYS_SECONDS = (0.5, 1.5)
+
     def __init__(self, config: ModelConfig):
         self.config = config
 
@@ -65,31 +69,42 @@ class OpenAICompatibleClient:
         errors = []
         data = None
         for request_url in endpoints:
-            request = urllib.request.Request(
-                request_url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.config.api_key}",
-                    "Accept": "application/json",
-                },
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
-                    raw = response.read().decode("utf-8", errors="replace")
-                    try:
-                        data = json.loads(raw)
-                    except json.JSONDecodeError as exc:
-                        errors.append(f"{request_url}: HTTP {response.status}, non-JSON body {raw[:120]!r}")
-                        continue
-            except urllib.error.HTTPError as exc:
-                raw = exc.read().decode("utf-8", errors="replace")[:120]
-                errors.append(f"{request_url}: HTTP {exc.code}, body {raw!r}")
-                continue
-            except (urllib.error.URLError, TimeoutError) as exc:
-                errors.append(f"{request_url}: {exc}")
-                continue
+            for attempt in range(1, self.MAX_TRANSIENT_ATTEMPTS + 1):
+                request = urllib.request.Request(
+                    request_url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.config.api_key}",
+                        "Accept": "application/json",
+                    },
+                    method="POST",
+                )
+                retry = False
+                try:
+                    with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
+                        raw = response.read().decode("utf-8", errors="replace")
+                        try:
+                            data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            errors.append(
+                                f"{request_url} attempt {attempt}: HTTP {response.status}, "
+                                f"non-JSON body {raw[:120]!r}"
+                            )
+                            break
+                except urllib.error.HTTPError as exc:
+                    raw = exc.read().decode("utf-8", errors="replace")[:120]
+                    errors.append(f"{request_url} attempt {attempt}: HTTP {exc.code}, body {raw!r}")
+                    retry = exc.code == 429 or 500 <= exc.code < 600
+                except (urllib.error.URLError, TimeoutError) as exc:
+                    errors.append(f"{request_url} attempt {attempt}: {exc}")
+                    retry = True
+
+                if data is not None:
+                    break
+                if not retry or attempt >= self.MAX_TRANSIENT_ATTEMPTS:
+                    break
+                time.sleep(self.RETRY_DELAYS_SECONDS[attempt - 1])
             if data is not None:
                 break
 

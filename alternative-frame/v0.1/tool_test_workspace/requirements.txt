@@ -1,0 +1,8 @@
+Create a Python module named hello.py in this directory.
+
+Requirements:
+1. Implement add(a, b) and return the sum of the two arguments.
+2. Create test_hello.py using Python's built-in unittest module.
+3. The test must verify add(2, 3) == 5.
+4. Run the test with Python and fix the implementation if the test fails.
+5. Do not report success until the real test command exits with code 0.

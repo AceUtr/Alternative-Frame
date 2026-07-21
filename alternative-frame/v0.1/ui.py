@@ -5,6 +5,7 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Dict
 
@@ -13,6 +14,7 @@ from core.acceptance import AcceptanceEvaluator
 from core.tool_calling_agent import ToolCallingAgent
 from core.main_agent import MainAgent
 from core.model_client import ModelConfig, OpenAICompatibleClient
+from core.models import Plan, SubTask
 from core.orchestrator import Orchestrator, RunReport
 from core.planning import PlanningPipeline
 from core.tools import ExperimentRunner, FileEditor, GitClient, ShellRunner, TestRunner, ToolRegistry
@@ -34,7 +36,11 @@ COLORS = {
 }
 
 
-def build_registry(client=None, workspace=None) -> AgentRegistry:
+PROJECT_DIR = Path(__file__).resolve().parent
+TOOL_TEST_WORKSPACE = PROJECT_DIR / "tool_test_workspace"
+
+
+def build_registry(client=None, workspace=None, on_tool_event=None, tool_test: bool = False) -> AgentRegistry:
     registry = AgentRegistry()
     if client is not None:
         workspace = workspace or __import__("pathlib").Path.cwd()
@@ -57,8 +63,60 @@ def build_registry(client=None, workspace=None) -> AgentRegistry:
             registry.register(DeterministicAgent(role))
         else:
             max_steps = 24 if role in ("developer", "experimenter") else 12
-            registry.register(ToolCallingAgent(role, client, ToolRegistry(permissions[role]), prompt, max_steps=max_steps))
+            if tool_test:
+                prompt += (
+                    "\nThis is an isolated tool-call self-test. Perform the requested workspace actions "
+                    "with tools, run the real unittest command, and stop immediately after it passes."
+                )
+            registry.register(
+                ToolCallingAgent(
+                    role,
+                    client,
+                    ToolRegistry(permissions[role]),
+                    prompt,
+                    max_steps=max_steps,
+                    on_tool_event=on_tool_event,
+                )
+            )
     return registry
+
+
+def build_tool_test_plan(goal: str) -> Plan:
+    return Plan(
+        goal=goal,
+        subtasks=[
+            SubTask(
+                id="tool_call_self_test",
+                role="developer",
+                description=goal,
+                acceptance=["files_created", "tests_pass"],
+                max_retries=0,
+                metadata={
+                    "expected_outputs": ["hello.py", "test_hello.py"],
+                    "checks": [
+                        {"id": "files_created", "check_type": "file_exists"},
+                        {
+                            "id": "tests_pass",
+                            "check_type": "command",
+                            "command": "python -m unittest -v test_hello.py",
+                        },
+                    ],
+                },
+            )
+        ],
+        final_acceptance=["files_created", "tests_pass"],
+    )
+
+
+def prepare_repair_fixture(workspace: Path = TOOL_TEST_WORKSPACE) -> None:
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "hello.py").write_text(
+        'def add(a, b):\n'
+        '    """Return the sum of two values."""\n'
+        '    # Deliberate demo defect: diagnose this from the failing test.\n'
+        '    return a - b\n',
+        encoding="utf-8",
+    )
 
 
 class FreshUI(tk.Tk):
@@ -143,9 +201,32 @@ class FreshUI(tk.Tk):
         self.goal.insert("1.0", "开发一个 FastAPI 服务，需要用户登录、自动化测试和 API 文档")
         actions = tk.Frame(inner, bg=COLORS["card"])
         actions.pack(fill=tk.X, pady=(10, 0))
-        tk.Label(actions, text="领域由 IntentParser 自动识别", bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT)
+        self.execution_mode = tk.StringVar(value="标准多 Agent")
+        mode_box = ttk.Combobox(
+            actions,
+            textvariable=self.execution_mode,
+            state="readonly",
+            values=["标准多 Agent", "工具调用自检", "失败修复自检"],
+            width=16,
+        )
+        mode_box.pack(side=tk.LEFT)
+        mode_box.bind("<<ComboboxSelected>>", self._on_execution_mode_changed)
         self.run_btn = ttk.Button(actions, text="开始协作  →", style="Accent.TButton", command=self.start_run)
         self.run_btn.pack(side=tk.RIGHT)
+
+    def _on_execution_mode_changed(self, _event=None):
+        mode = self.execution_mode.get()
+        if mode not in ("工具调用自检", "失败修复自检"):
+            return
+        prompt_name = "REPAIR_PROMPT.txt" if mode == "失败修复自检" else "TEST_PROMPT.txt"
+        prompt_path = TOOL_TEST_WORKSPACE / prompt_name
+        if prompt_path.exists():
+            prompt = prompt_path.read_text(encoding="utf-8")
+        else:
+            prompt = "Read requirements.txt, create hello.py and test_hello.py, then run unittest until it passes."
+        self.goal.delete("1.0", tk.END)
+        self.goal.insert("1.0", prompt)
+        self.temperature.set("0.1")
 
     def _model_card(self, card):
         inner = tk.Frame(card, bg=COLORS["card"], padx=16, pady=14, width=390)
@@ -252,21 +333,46 @@ class FreshUI(tk.Tk):
         self.task_items.clear()
         self._set_state("运行中", COLORS["blue_dark"])
         self.append_log(f"MainAgent ← {goal}")
-        threading.Thread(target=self._run_worker, args=(goal, config), daemon=True).start()
+        execution_mode = self.execution_mode.get()
+        tool_test = execution_mode in ("工具调用自检", "失败修复自检")
+        repair_test = execution_mode == "失败修复自检"
+        threading.Thread(target=self._run_worker, args=(goal, config, tool_test, repair_test), daemon=True).start()
 
-    def _run_worker(self, goal, config):
+    def _run_worker(self, goal, config, tool_test=False, repair_test=False):
         try:
             pipeline = PlanningPipeline()
-            intent = pipeline.intent_parser.parse(goal)
-            drafts = pipeline.decomposer.decompose(intent)
-            drafts = pipeline.acceptance_generator.generate(intent, drafts)
-            plan = pipeline.planner.build(intent, drafts)
-            self.events.put(("plan", (intent.domain, plan)))
+            if tool_test:
+                TOOL_TEST_WORKSPACE.mkdir(parents=True, exist_ok=True)
+                if repair_test:
+                    prepare_repair_fixture()
+                    self.events.put(("fixture_ready", "已重置故障：hello.py 当前错误地执行减法"))
+                plan = build_tool_test_plan(goal)
+                domain = "tool_call_self_test"
+                workspace = TOOL_TEST_WORKSPACE
+            else:
+                intent = pipeline.intent_parser.parse(goal)
+                drafts = pipeline.decomposer.decompose(intent)
+                drafts = pipeline.acceptance_generator.generate(intent, drafts)
+                plan = pipeline.planner.build(intent, drafts)
+                domain = intent.domain
+                workspace = PROJECT_DIR
+            self.events.put(("plan", (domain, plan)))
             client = OpenAICompatibleClient(config) if config else None
-            registry = build_registry(client, workspace=__import__("pathlib").Path.cwd())
+
+            def on_tool_event(event, payload):
+                self.events.put(("tool_event", (event, payload)))
+
+            registry = build_registry(
+                client,
+                workspace=workspace,
+                on_tool_event=on_tool_event,
+                tool_test=tool_test,
+            )
+
             def on_event(event, task, result=None):
                 self.events.put(("task_event", (event, task.id, result)))
-            evaluator = AcceptanceEvaluator(workspace=__import__("pathlib").Path.cwd(), execute_commands=False) if client else None
+
+            evaluator = AcceptanceEvaluator(workspace=workspace, execute_commands=tool_test) if client else None
             main = MainAgent(Orchestrator(registry, max_workers=4, on_event=on_event, acceptance=evaluator), pipeline.build)
             report = main.orchestrator.run(plan)
             self.events.put(("report", report))
@@ -296,6 +402,10 @@ class FreshUI(tk.Tk):
                     self._show_report(payload)
                 elif kind == "task_event":
                     self._show_task_event(payload)
+                elif kind == "tool_event":
+                    self._show_tool_event(payload)
+                elif kind == "fixture_ready":
+                    self.append_log(f"FIXTURE → {payload}")
                 elif kind == "run_error":
                     self.append_log("ERROR → " + payload)
                     self.running = False
@@ -335,6 +445,31 @@ class FreshUI(tk.Tk):
             vals[4] = result.attempts
             self.append_log(f"{task_id} → {result.status}")
         self.tree.item(item, values=vals)
+
+    def _show_tool_event(self, payload):
+        event, detail = payload
+        task_id = detail.get("task_id", "unknown")
+        step = detail.get("step", "?")
+        tool = detail.get("tool", "unknown")
+        if event == "tool_started":
+            arguments = self._compact(detail.get("arguments", {}), 240)
+            self.append_log(f"TOOL #{step} · {task_id} · {tool} · args={arguments}")
+            return
+        success = detail.get("success", False)
+        duration = float(detail.get("duration_seconds", 0.0))
+        output = detail.get("output") or detail.get("error") or ""
+        self.append_log(
+            f"TOOL #{step} · {tool} · {'success' if success else 'failed'} · "
+            f"{duration:.3f}s · {self._compact(output, 300)}"
+        )
+
+    @staticmethod
+    def _compact(value, limit):
+        import json
+
+        text = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
+        text = " ".join(text.split())
+        return text if len(text) <= limit else text[: limit - 3] + "..."
 
     def _set_state(self, text, color):
         self.status.set(text)

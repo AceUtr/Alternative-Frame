@@ -1,0 +1,13 @@
+This is a software engineering tool-call test.
+
+The tool workspace is already restricted to tool_test_workspace. Use paths relative to that workspace.
+
+Complete these actions using the available tools, not by merely describing code:
+1. Read requirements.txt.
+2. Create hello.py and implement add(a, b).
+3. Create test_hello.py with unittest tests.
+4. Run the tests with Python.
+5. If a test fails, inspect the error, fix the code, and run the tests again.
+6. Only finish after the real test command exits with code 0.
+
+In the final response, list the files created and the exact test command and result.

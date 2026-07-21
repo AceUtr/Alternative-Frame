@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Mapping
+import time
+from typing import Callable, Mapping
 
 from .agents import Agent
 from .models import AgentResult, SubTask, utc_now
@@ -12,8 +13,30 @@ from .tools import ToolRegistry
 class ToolCallingAgent(Agent):
     """LLM agent loop: model decides, registry executes, model observes."""
 
-    def __init__(self, role: str, client: OpenAICompatibleClient, tools: ToolRegistry, system_prompt: str, max_steps: int = 20):
-        self.role, self.client, self.tools, self.system_prompt, self.max_steps = role, client, tools, system_prompt, max_steps
+    def __init__(
+        self,
+        role: str,
+        client: OpenAICompatibleClient,
+        tools: ToolRegistry,
+        system_prompt: str,
+        max_steps: int = 20,
+        on_tool_event: Callable[[str, dict], None] | None = None,
+    ):
+        self.role = role
+        self.client = client
+        self.tools = tools
+        self.system_prompt = system_prompt
+        self.max_steps = max_steps
+        self.on_tool_event = on_tool_event
+
+    def _emit_tool_event(self, event: str, payload: dict) -> None:
+        if not self.on_tool_event:
+            return
+        try:
+            self.on_tool_event(event, payload)
+        except Exception:
+            # Observability must never break task execution.
+            pass
 
     def run(self, task: SubTask, context: Mapping[str, AgentResult]) -> AgentResult:
         started = utc_now()
@@ -37,14 +60,53 @@ class ToolCallingAgent(Agent):
             for call in tool_calls:
                 name = call.get("function", {}).get("name", "")
                 raw_args = call.get("function", {}).get("arguments", {})
-                args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                try:
+                    args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                except json.JSONDecodeError as exc:
+                    args = {}
+                    result_payload = {
+                        "task_id": task.id,
+                        "role": self.role,
+                        "step": step + 1,
+                        "tool": name,
+                        "arguments": raw_args,
+                        "success": False,
+                        "error": f"invalid tool arguments: {exc}",
+                        "output": "",
+                        "duration_seconds": 0.0,
+                    }
+                    self._emit_tool_event("tool_finished", result_payload)
+                    evidence.append(f"tool={name};success=False")
+                    messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": json.dumps(result_payload, ensure_ascii=False)})
+                    continue
                 signature = name + ":" + json.dumps(args, ensure_ascii=False, sort_keys=True)
                 call_counts[signature] = call_counts.get(signature, 0) + 1
                 if call_counts[signature] >= 3:
                     return AgentResult(task.id, "failed", summary="repeated identical tool call detected", evidence=evidence, failures=["repeated_tool_call"], started_at=started, finished_at=utc_now())
+                event_payload = {
+                    "task_id": task.id,
+                    "role": self.role,
+                    "step": step + 1,
+                    "tool": name,
+                    "arguments": args,
+                }
+                self._emit_tool_event("tool_started", event_payload)
+                tool_started = time.perf_counter()
                 result = self.tools.execute(name, args)
+                result.duration_seconds = time.perf_counter() - tool_started
                 evidence.append(f"tool={name};success={result.success}")
                 if result.success and result.metadata.get("artifacts"):
                     artifacts.extend(result.metadata["artifacts"])
+                self._emit_tool_event(
+                    "tool_finished",
+                    {
+                        **event_payload,
+                        "success": result.success,
+                        "output": result.output,
+                        "error": result.error,
+                        "exit_code": result.exit_code,
+                        "duration_seconds": result.duration_seconds,
+                    },
+                )
                 messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": json.dumps(result.__dict__, ensure_ascii=False)})
         return AgentResult(task.id, "failed", summary=f"tool calling max steps exceeded ({self.max_steps})", evidence=evidence, failures=["max_tool_steps_exceeded"], started_at=started, finished_at=utc_now())

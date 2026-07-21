@@ -7,9 +7,11 @@ function validResult(): AnalysisResult {
   return {
     taskId: "T1",
     objective: "目标",
-    requirements: [{ id: "FR-001", statement: "系统应执行行为。", category: "FUNCTIONAL", sourceReferences: [{ sourceId: "S1" }] }],
-    acceptanceCriteria: [{ id: "AC-FR-001-01", requirementId: "FR-001", scenarioType: "HAPPY_PATH", given: "前置", when: "触发", then: "可观察结果" }],
-    dependencies: [], clarifications: [], validationIssues: [], generatedAt: new Date(0).toISOString(),
+    recognizedContext: { businessGoals: [], actors: [], scenarios: [], functionalScope: [], businessRules: [], inputs: [], outputs: [], exceptionScenarios: [], constraints: [], externalDependencies: [] },
+    requirements: [{ id: "FR-001", name: "行为", statement: "系统应执行行为。", trigger: "前置", processing: "触发", expectedOutcome: "结果", state: "DEFINED", category: "FUNCTIONAL", sourceReferences: [{ sourceId: "S1" }], dependencyIds: [], clarificationIds: [] }],
+    acceptanceCriteria: [{ id: "AC-FR-001-01", requirementId: "FR-001", title: "正常", scenarioType: "HAPPY_PATH", given: "前置", when: "触发", then: "可观察结果" }],
+    dependencies: [], dependencyReport: { status: "NONE_KNOWN", displayText: "无已知依赖", items: [] },
+    clarifications: [], assumptions: [], validationIssues: [], generatedAt: new Date(0).toISOString(),
   };
 }
 

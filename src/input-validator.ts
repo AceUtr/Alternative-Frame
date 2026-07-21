@@ -1,4 +1,5 @@
-import type { CreateAnalysisCommand, ValidationIssue } from "./models.ts";
+import { ApplicationError } from "./errors.ts";
+import type { CreateAnalysisCommand, Dependency, ValidationIssue } from "./models.ts";
 
 export const LIMITS = {
   maxSources: 100,
@@ -6,9 +7,18 @@ export const LIMITS = {
   maxTotalLength: 100_000,
 } as const;
 
-export class InvalidInputError extends Error {
-  constructor(public readonly issues: ValidationIssue[]) {
-    super("至少需要一条非空原始需求");
+const dependencyTypes = new Set<Dependency["type"]>([
+  "EXTERNAL_SYSTEM", "API", "DATA", "PERMISSION", "PREREQUISITE", "BUSINESS_DECISION",
+]);
+
+export class InvalidInputError extends ApplicationError {
+  constructor(issues: ValidationIssue[]) {
+    super(
+      "INPUT_INVALID",
+      "缺少或包含无效的原始业务需求",
+      issues,
+      ["请提供业务目标、目标角色、使用场景、功能范围、业务规则及非功能约束"],
+    );
     this.name = "InvalidInputError";
   }
 }
@@ -37,7 +47,7 @@ export function validateInput(command: CreateAnalysisCommand): ValidationIssue[]
     else if (seen.has(sourceId)) issues.push(issue("DUPLICATE_SOURCE_ID", `${path}.sourceId`, "sourceId 在请求内必须唯一"));
     else seen.add(sourceId);
 
-    if (!content.trim()) issues.push(issue("SOURCE_CONTENT_REQUIRED", `${path}.content`, "原始需求内容不能为空"));
+    if (!content.trim()) issues.push(issue("SOURCE_CONTENT_REQUIRED", `${path}.content`, "缺少原始业务需求"));
     if (content.length > LIMITS.maxSourceLength) {
       issues.push(issue("SOURCE_TOO_LONG", `${path}.content`, `单条原始需求不能超过 ${LIMITS.maxSourceLength} 个字符`));
     }
@@ -45,6 +55,19 @@ export function validateInput(command: CreateAnalysisCommand): ValidationIssue[]
 
   if (totalLength > LIMITS.maxTotalLength) {
     issues.push(issue("TOTAL_CONTENT_TOO_LONG", "sources", `原始需求总长度不能超过 ${LIMITS.maxTotalLength} 个字符`));
+  }
+
+  const supplied = command?.dependencies;
+  if (supplied !== undefined && !Array.isArray(supplied) && (typeof supplied !== "object" || supplied === null)) {
+    issues.push(issue("DEPENDENCIES_INVALID", "dependencies", "dependencies 必须是数组或键值对象"));
+  } else if (Array.isArray(supplied)) {
+    supplied.forEach((dependency, index) => {
+      const path = `dependencies[${index}]`;
+      if (!dependency?.name?.trim()) issues.push(issue("DEPENDENCY_NAME_REQUIRED", `${path}.name`, "依赖名称不能为空"));
+      if (dependency?.type && !dependencyTypes.has(dependency.type)) {
+        issues.push(issue("DEPENDENCY_TYPE_INVALID", `${path}.type`, "依赖类型不在允许范围内"));
+      }
+    });
   }
   return issues;
 }

@@ -1,458 +1,559 @@
 # 需求分析系统架构设计
 
-## 1. 设计范围
+## 1. 设计范围与约束
 
-本文基于 `requirements.md` 中 FR-001 至 FR-006，设计一个将原始业务需求转换为原子需求、验收条件、依赖和待澄清项的分析服务。
+本文基于 `requirements.md` 中 FR-001～FR-006，设计一个将原始业务需求转换为“原子需求、验收条件、依赖和待澄清项”的最小可实现系统。
 
-当前没有具体业务域、目标角色、业务规则或非功能指标，因此本设计只定义任务级模块、接口和数据模型，不假定登录、数据库、消息队列、第三方 AI 服务或其他外部系统必然存在。
+当前未提供具体业务领域，因此本设计仅定义通用分析能力，不引入登录、支付、审批等业务模块或规则。
 
-## 2. 架构原则
+### 1.1 设计目标
 
-1. **事实可追踪**：正式需求中的确定性事实必须引用输入来源。
-2. **待确认内容隔离**：不确定信息进入待澄清项，不进入已确认需求。
-3. **确定性校验**：结构完整性、标识唯一性和引用完整性由规则校验器完成。
-4. **分析器可替换**：需求理解能力通过接口注入，可采用规则、人工流程或模型实现。
-5. **无状态优先**：单次分析通过请求与响应完成；持久化仅在后续确认需要历史记录时增加。
+- 接收非空需求文本并返回结构化分析结果；
+- 对空输入返回明确、可机器识别的校验错误及待澄清方向；
+- 保证需求、验收条件和追踪关系的完整性；
+- 将无法由输入证实的信息隔离为待澄清项；
+- 支持同步实现，后续可在不改变核心模型的前提下扩展异步处理。
 
-## 3. 系统上下文
+### 1.2 非目标
+
+- 不定义具体业务领域模型；
+- 不自动判定未经输入确认的业务事实；
+- 不规定自然语言分析必须使用规则引擎或大模型；
+- 不定义用户、租户、计费和持久化历史等未提出能力。
+
+## 2. 总体架构
+
+采用单体分层架构，优先保证简单可实现。首版可部署为一个无状态 HTTP 服务；分析结果直接响应调用方，不要求数据库。
 
 ```text
 调用方
   |
-  | AnalyzeRequest / AnalyzeResponse
+  | HTTP/JSON
   v
-需求分析服务
-  |-- 输入规范化
-  |-- 需求拆解
-  |-- 验收条件生成
-  |-- 依赖识别
-  |-- 待澄清项管理
-  `-- 结果校验与组装
-
-可选适配器（未确认依赖）
-  |-- 分析引擎实现：规则 / 人工 / 外部模型
-  `-- 结果仓储实现：内存 / 文件 / 数据库
+Analysis API
+  |
+  v
+Analysis Application Service
+  |---- Input Validator
+  |---- Requirement Decomposer
+  |---- Acceptance Criteria Generator
+  |---- Dependency Extractor
+  |---- Clarification Collector
+  |---- Result Validator / Traceability Builder
+  v
+Structured AnalysisResult
 ```
 
-服务核心不直接依赖特定传输协议、模型供应商或存储产品。
+### 2.1 分层职责
 
-## 4. 模块设计
+| 层 | 职责 | 不负责 |
+|---|---|---|
+| API 层 | 协议转换、请求校验、HTTP 状态码、错误映射 | 需求拆解规则 |
+| 应用层 | 编排分析步骤、组装结果 | 具体 HTTP 细节 |
+| 领域层 | 原子需求、验收条件、依赖、待澄清项的生成与一致性校验 | 存储与网络 |
+| 基础设施层 | 可插拔文本分析器、日志与可选持久化适配器 | 改变领域模型语义 |
 
-| 模块 | 职责 | 输入 | 输出 | 追踪需求 |
-|---|---|---|---|---|
-| `AnalysisApplicationService` | 编排完整分析流程，统一处理失败 | `AnalyzeCommand` | `AnalysisResult` | FR-001, FR-006 |
-| `InputNormalizer` | 去除首尾空白、规范来源，判定空输入 | 原始文本、依赖 | `NormalizedInput` | FR-001 |
-| `RequirementDecomposer` | 拆分单一职责需求，保留来源引用 | `NormalizedInput` | `Requirement[]` | FR-002 |
-| `AcceptanceCriteriaGenerator` | 为可实施需求生成可验证条件 | `Requirement[]`, `NormalizedInput` | `AcceptanceCriterion[]` | FR-003 |
-| `DependencyDetector` | 合并显式依赖并标记状态 | `NormalizedInput` | `Dependency[]` | FR-004 |
-| `ClarificationManager` | 汇总缺失、模糊和冲突信息 | 各模块发现项 | `Clarification[]` | FR-005 |
-| `AnalysisValidator` | 校验唯一性、关联、完整性和事实来源 | 候选结果 | `ValidationIssue[]` | FR-002, FR-003, FR-005, FR-006 |
-| `ResultAssembler` | 生成稳定的完整输出，不省略空章节 | 各模块结果 | `AnalysisResult` | FR-006 |
+## 3. 模块设计
 
-### 4.1 依赖方向
+### 3.1 Analysis API
+
+**职责**
+
+- 接收 `AnalyzeRequirementsRequest`；
+- 执行协议级校验（JSON 格式、字段类型、请求大小上限由部署配置决定）；
+- 调用 `AnalysisService.analyze`；
+- 将领域错误映射为统一错误响应。
+
+**接口**
 
 ```text
-Transport Adapter -> AnalysisApplicationService -> Domain Ports
-                                                -> Domain Services
-Infrastructure Adapter ------------------------> Domain Ports
+POST /v1/requirement-analyses
+Content-Type: application/json
 ```
 
-领域模型与校验规则不依赖 HTTP、数据库或具体分析引擎。适配器负责协议和供应商格式转换。
+首版为同步接口。若分析耗时以后无法满足部署环境超时限制，可新增异步资源接口，而不修改本接口的数据模型。
 
-## 5. 显式接口
+### 3.2 Input Validator
 
-以下为语言无关的 TypeScript 风格契约。实现可映射为其他语言中的接口和不可变数据对象。
+**职责**
+
+- 对 `sourceText` 去除首尾空白后判空；
+- 校验调用方提供依赖的必需字段与枚举值；
+- 只报告输入问题，不补造缺失业务信息。
+
+**领域接口**
+
+```ts
+interface InputValidator {
+  validate(request: AnalyzeRequirementsRequest): ValidationIssue[];
+}
+```
+
+### 3.3 Requirement Decomposer
+
+**职责**
+
+- 从输入中提取单一职责、可独立验证的候选需求；
+- 为需求分配本次结果内唯一且稳定的顺序标识 `FR-001`、`FR-002`……；
+- 保留来源引用；无法追踪到输入的内容不得成为确认需求。
+
+**领域接口**
+
+```ts
+interface RequirementDecomposer {
+  decompose(context: AnalysisContext): Requirement[];
+}
+```
+
+`sourceRefs` 使用输入文本的字符区间，便于校验事实来源；字符下标采用 Unicode code point、左闭右开区间，具体实现必须全局一致。
+
+### 3.4 Acceptance Criteria Generator
+
+**职责**
+
+- 为每个可实施需求生成至少一项验收条件；
+- 输出前置条件、触发动作和可观察结果；
+- 信息不足以生成异常或边界场景时，不设定虚构阈值，而是交给待澄清模块。
+
+**领域接口**
+
+```ts
+interface AcceptanceCriteriaGenerator {
+  generate(requirement: Requirement, context: AnalysisContext): AcceptanceCriterion[];
+}
+```
+
+### 3.5 Dependency Extractor
+
+**职责**
+
+- 合并调用方显式依赖与原文中可追踪的依赖；
+- 依赖细节不足时标记 `PENDING_CONFIRMATION`；
+- 没有已知依赖时返回空列表，并由结果摘要表达 `NO_KNOWN_DEPENDENCIES`。
+
+**领域接口**
+
+```ts
+interface DependencyExtractor {
+  extract(context: AnalysisContext): Dependency[];
+}
+```
+
+### 3.6 Clarification Collector
+
+**职责**
+
+- 收集缺失、模糊、冲突以及会影响实现或验收的问题；
+- 合并语义重复的问题；
+- 生成本次结果内唯一标识 `Q-001`、`Q-002`……；
+- 空业务输入时至少覆盖业务目标、角色与场景、功能范围、业务规则、非功能约束。
+
+**领域接口**
+
+```ts
+interface ClarificationCollector {
+  collect(context: AnalysisContext, draft: AnalysisDraft): Clarification[];
+}
+```
+
+### 3.7 Result Validator / Traceability Builder
+
+**职责**
+
+- 验证标识唯一性和引用完整性；
+- 验证每项可实施需求至少关联一个验收条件；
+- 验证验收条件的 Given/When/Then 等价字段非空；
+- 构建需求到验收条件的追踪项；
+- 对内部生成的不一致结果失败关闭，不返回表面成功。
+
+**领域接口**
+
+```ts
+interface ResultValidator {
+  validate(result: AnalysisResult): ValidationIssue[];
+}
+
+interface TraceabilityBuilder {
+  build(requirements: Requirement[], criteria: AcceptanceCriterion[]): TraceLink[];
+}
+```
+
+### 3.8 Analysis Application Service
+
+**职责**：按固定顺序编排模块，并形成事务边界。无数据库时，事务边界表示“只返回整体有效结果，不返回未经标记的部分成功结果”。
 
 ```ts
 interface AnalysisService {
-  analyze(command: AnalyzeCommand): Promise<AnalysisResult>;
-}
-
-interface RequirementDecomposer {
-  decompose(input: NormalizedInput): Promise<DecompositionOutput>;
-}
-
-interface AcceptanceCriteriaGenerator {
-  generate(
-    input: NormalizedInput,
-    requirements: Requirement[]
-  ): Promise<CriteriaOutput>;
-}
-
-interface DependencyDetector {
-  detect(input: NormalizedInput): Promise<DependencyOutput>;
-}
-
-interface AnalysisValidator {
-  validate(candidate: AnalysisResult): ValidationIssue[];
-}
-
-interface AnalysisResultRepository {
-  save(result: AnalysisResult): Promise<void>;
-  findById(analysisId: string): Promise<AnalysisResult | null>;
+  analyze(request: AnalyzeRequirementsRequest): AnalysisResult;
 }
 ```
 
-`AnalysisResultRepository` 是可选端口。首版若不要求历史查询，不注入该端口，也不提供查询能力。
+推荐流程：
 
-### 5.1 应用服务行为
+1. 规范化并校验输入；
+2. 若 `sourceText` 为空，返回 `INPUT_INVALID`，同时在错误详情中给出补充原始需求的建议，不执行具体业务拆解；
+3. 建立只读 `AnalysisContext`；
+4. 拆解原子需求；
+5. 为需求生成验收条件；
+6. 提取依赖；
+7. 收集待澄清项；
+8. 构建追踪关系并执行结果一致性校验；
+9. 返回完整 `AnalysisResult`。内部一致性校验失败时返回内部错误并记录诊断信息。
 
-```ts
-class AnalysisApplicationService implements AnalysisService {
-  constructor(
-    normalizer: InputNormalizer,
-    decomposer: RequirementDecomposer,
-    criteriaGenerator: AcceptanceCriteriaGenerator,
-    dependencyDetector: DependencyDetector,
-    clarificationManager: ClarificationManager,
-    validator: AnalysisValidator,
-    assembler: ResultAssembler,
-    repository?: AnalysisResultRepository
-  );
+## 4. 外部接口
 
-  analyze(command: AnalyzeCommand): Promise<AnalysisResult>;
-}
-```
-
-处理顺序：
-
-1. 规范化并验证请求。
-2. 空输入时直接生成“缺少原始业务需求”的待澄清结果。
-3. 非空输入并行执行候选需求拆解与依赖识别。
-4. 基于候选需求生成验收条件。
-5. 汇总分析阶段发现的缺失、歧义和冲突。
-6. 组装结果并执行确定性校验。
-7. 存在阻断性校验错误时返回契约错误，不发布不完整结果。
-8. 可选地保存通过校验的结果。
-
-## 6. API 契约
-
-传输协议尚未确认。若采用 HTTP，建议提供以下最小接口；其他协议应保持相同语义。
-
-### 6.1 创建分析
-
-`POST /v1/analyses`
-
-请求：
+### 4.1 分析请求
 
 ```json
 {
-  "rawRequirement": "非空业务需求文本",
-  "dependencies": [
+  "sourceText": "系统应……",
+  "providedDependencies": [
     {
-      "name": "调用方明确提供的依赖名称",
-      "type": "external_system",
-      "description": "可选说明"
+      "name": "外部系统名称",
+      "type": "EXTERNAL_SYSTEM",
+      "description": "调用方已确认的依赖说明"
+    }
+  ]
+}
+```
+
+字段定义：
+
+| 字段 | 类型 | 必需 | 规则 |
+|---|---|---:|---|
+| `sourceText` | string | 是 | 去除首尾空白后至少 1 个字符 |
+| `providedDependencies` | array | 否 | 缺省为空数组 |
+| `providedDependencies[].name` | string | 是 | 非空 |
+| `providedDependencies[].type` | DependencyType | 是 | 必须为已定义枚举 |
+| `providedDependencies[].description` | string | 是 | 非空，仅表达调用方已确认信息 |
+
+### 4.2 成功响应
+
+HTTP `200 OK`
+
+```json
+{
+  "analysisId": "0195f4c0-7b4f-7000-8000-000000000001",
+  "status": "COMPLETED",
+  "requirements": [
+    {
+      "id": "FR-001",
+      "statement": "系统应……",
+      "implementability": "IMPLEMENTABLE",
+      "sourceRefs": [{"start": 0, "end": 5}]
     }
   ],
-  "source": {
-    "type": "user_input",
-    "reference": "可选的外部文档或工单标识"
-  }
-}
-```
-
-成功响应：`200 OK`
-
-```json
-{
-  "analysisId": "AN-唯一标识",
-  "status": "completed",
-  "goal": "从输入提取的目标；无法确定时明确说明",
-  "requirements": [],
-  "acceptanceCriteria": [],
+  "acceptanceCriteria": [
+    {
+      "id": "AC-FR001-01",
+      "requirementId": "FR-001",
+      "given": ["已满足前置条件"],
+      "when": "发生明确动作",
+      "then": ["产生可观察结果"],
+      "scenarioType": "HAPPY_PATH"
+    }
+  ],
   "dependencies": [],
+  "dependencyState": "NO_KNOWN_DEPENDENCIES",
   "clarifications": [],
-  "validation": {
-    "valid": true,
-    "issues": []
+  "traceability": [
+    {"requirementId": "FR-001", "acceptanceCriterionIds": ["AC-FR001-01"]}
+  ]
+}
+```
+
+### 4.3 错误响应
+
+HTTP `400 Bad Request`：JSON 或字段类型不合法。  
+HTTP `422 Unprocessable Entity`：请求结构正确，但 `sourceText` 为空或依赖字段违反领域校验。  
+HTTP `500 Internal Server Error`：分析器异常或生成结果未通过内部一致性校验。
+
+```json
+{
+  "error": {
+    "code": "INPUT_INVALID",
+    "message": "缺少原始业务需求",
+    "issues": [
+      {
+        "path": "sourceText",
+        "code": "REQUIRED",
+        "message": "sourceText 去除首尾空白后不能为空"
+      }
+    ],
+    "clarificationHints": [
+      "请提供业务目标、目标角色、使用场景、功能范围、业务规则及非功能约束"
+    ]
   }
 }
 ```
 
-空输入不是传输格式错误。服务返回 `200 OK` 和结构完整的结果，其中需求与验收条件为空，待澄清项至少包含缺少原始业务需求、目标角色、场景、范围、规则及非功能约束。
+错误代码：
 
-格式错误返回：`400 Bad Request`
+| code | 含义 |
+|---|---|
+| `MALFORMED_REQUEST` | JSON 或字段类型错误 |
+| `INPUT_INVALID` | 输入不满足领域前置条件 |
+| `ANALYSIS_FAILED` | 分析器执行失败 |
+| `RESULT_INCONSISTENT` | 生成结果未通过一致性校验 |
 
-```json
-{
-  "code": "INVALID_REQUEST",
-  "message": "请求无法解析或字段类型不符合契约",
-  "details": [
-    { "path": "dependencies[0].type", "reason": "unsupported_value" }
-  ]
-}
-```
+## 5. 数据模型
 
-内部分析结果未通过结构校验返回：`422 Unprocessable Entity`
-
-```json
-{
-  "code": "INVALID_ANALYSIS_RESULT",
-  "message": "候选分析结果未通过完整性校验",
-  "details": [
-    { "rule": "CRITERION_REQUIREMENT_REFERENCE", "entityId": "AC-001" }
-  ]
-}
-```
-
-### 6.2 可选历史查询
-
-仅当确认需要持久化时启用：
-
-`GET /v1/analyses/{analysisId}`
-
-- `200 OK`：返回 `AnalysisResult`。
-- `404 Not Found`：不存在对应分析。
-- 未启用仓储时不暴露该路由。
-
-## 7. 数据模型
-
-### 7.1 输入模型
+以下 TypeScript 仅作为明确、语言无关的数据契约；实现可使用其他语言并保持等价约束。
 
 ```ts
 type DependencyType =
-  | "external_system"
-  | "interface"
-  | "data"
-  | "permission"
-  | "infrastructure"
-  | "prerequisite_feature"
-  | "delivery";
+  | "EXTERNAL_SYSTEM"
+  | "INTERFACE"
+  | "DATA"
+  | "PERMISSION"
+  | "INFRASTRUCTURE"
+  | "PREREQUISITE_FEATURE";
 
-interface AnalyzeCommand {
-  rawRequirement?: string | null;
-  dependencies?: SuppliedDependency[];
-  source?: InputSource;
+type DependencyStatus = "CONFIRMED" | "PENDING_CONFIRMATION";
+type DependencyState = "HAS_DEPENDENCIES" | "NO_KNOWN_DEPENDENCIES";
+type Implementability = "IMPLEMENTABLE" | "BLOCKED_BY_CLARIFICATION";
+type ScenarioType = "HAPPY_PATH" | "ERROR_PATH" | "BOUNDARY";
+
+interface AnalyzeRequirementsRequest {
+  sourceText: string;
+  providedDependencies?: ProvidedDependency[];
 }
 
-interface SuppliedDependency {
+interface ProvidedDependency {
   name: string;
   type: DependencyType;
-  description?: string;
+  description: string;
 }
 
-interface InputSource {
-  type: "user_input" | "document" | "ticket" | "other";
-  reference?: string;
-}
-
-interface NormalizedInput {
-  rawRequirement: string;
-  suppliedDependencies: SuppliedDependency[];
-  source: InputSource;
-  isEmpty: boolean;
-}
-```
-
-### 7.2 输出与领域模型
-
-```ts
-type AnalysisStatus = "completed" | "needs_clarification";
-type RequirementKind = "system_behavior" | "business_rule" | "quality_constraint";
-type RequirementState = "implementable" | "needs_clarification";
-type DependencyStatus = "confirmed" | "pending_confirmation" | "none_known";
-type Severity = "error" | "warning";
-
-interface AnalysisResult {
-  analysisId: string;
-  status: AnalysisStatus;
-  goal: string;
-  requirements: Requirement[];
-  acceptanceCriteria: AcceptanceCriterion[];
-  dependencies: Dependency[];
-  clarifications: Clarification[];
-  validation: ValidationSummary;
+interface SourceRef {
+  start: number; // inclusive
+  end: number;   // exclusive; end > start
 }
 
 interface Requirement {
-  id: string;                         // 本次结果内唯一，如 FR-001
-  statement: string;                  // 使用“应”表达强制要求
-  kind: RequirementKind;
-  state: RequirementState;
-  sourceRefs: SourceReference[];      // 确定性事实至少一个来源
-  acceptanceCriterionIds: string[];
+  id: string; // ^FR-[0-9]{3,}$
+  statement: string;
+  implementability: Implementability;
+  sourceRefs: SourceRef[]; // 至少一个；仅任务级空输入错误场景除外且不生成 Requirement
 }
 
 interface AcceptanceCriterion {
-  id: string;                         // 本次结果内唯一，如 AC-FR001-01
-  requirementId: string;              // 必须引用存在的唯一需求
-  precondition: string;               // Given 或语义等价内容
-  trigger: string;                    // When 或语义等价内容
-  expectedResult: string;             // Then，可观察且可判定
-  scenario: "normal" | "exception" | "boundary" | "not_applicable";
-  sourceRefs: SourceReference[];
+  id: string; // ^AC-FR[0-9]{3,}-[0-9]{2,}$
+  requirementId: string;
+  given: string[]; // 至少一项
+  when: string;
+  then: string[];  // 至少一项且结果可观察
+  scenarioType: ScenarioType;
 }
 
 interface Dependency {
-  id: string;
+  id: string; // ^DEP-[0-9]{3,}$
   name: string;
-  type?: DependencyType;
-  status: DependencyStatus;
+  type: DependencyType;
   description: string;
-  sourceRefs: SourceReference[];
+  status: DependencyStatus;
+  source: "CALLER_PROVIDED" | "SOURCE_TEXT";
+  sourceRefs: SourceRef[]; // source 为 SOURCE_TEXT 时至少一项
 }
 
 interface Clarification {
-  id: string;                         // 本次结果内唯一，如 Q-001
+  id: string; // ^Q-[0-9]{3,}$
   question: string;
   impact: string;
   relatedRequirementIds: string[];
-  sourceRefs: SourceReference[];
+  sourceRefs: SourceRef[];
 }
 
-interface SourceReference {
-  sourceType: "raw_requirement" | "supplied_dependency" | "confirmed_constraint";
-  locator: string;                    // 字符区间、字段路径或外部引用
-  excerpt?: string;
+interface TraceLink {
+  requirementId: string;
+  acceptanceCriterionIds: string[];
 }
 
-interface ValidationSummary {
-  valid: boolean;
-  issues: ValidationIssue[];
+interface AnalysisResult {
+  analysisId: string; // UUID
+  status: "COMPLETED";
+  requirements: Requirement[];
+  acceptanceCriteria: AcceptanceCriterion[];
+  dependencies: Dependency[];
+  dependencyState: DependencyState;
+  clarifications: Clarification[];
+  traceability: TraceLink[];
 }
 
 interface ValidationIssue {
-  severity: Severity;
-  rule: string;
-  entityId?: string;
+  path: string;
+  code: string;
   message: string;
 }
 ```
 
-### 7.3 标识与基数
+### 5.1 模型不变量
 
-- `analysisId`：全局唯一；格式可配置，不作为业务语义来源。
-- `Requirement.id`、`AcceptanceCriterion.id`、`Dependency.id`、`Clarification.id`：在单个分析结果内唯一。
-- 一个 `Requirement` 对应零到多个验收条件；仅 `needs_clarification` 状态允许为零。
-- 一个 `AcceptanceCriterion` 必须且只能属于一个 `Requirement`。
-- 空依赖输入且正文没有显式依赖时，输出一个 `status = none_known` 的依赖状态记录，确保章节不被静默省略。
+1. 所有集合内 `id` 唯一；
+2. `AcceptanceCriterion.requirementId` 必须引用现有需求；
+3. 每个 `IMPLEMENTABLE` 需求至少有一项验收条件；
+4. 每项验收条件只归属一个需求；
+5. 每个需求恰有一个 `TraceLink`，且其中验收条件集合与实际归属一致；
+6. `dependencies` 为空时 `dependencyState` 必须为 `NO_KNOWN_DEPENDENCIES`，否则为 `HAS_DEPENDENCIES`；
+7. `PENDING_CONFIRMATION` 依赖必须对应至少一个说明其影响的待澄清项；
+8. 正式需求陈述中的确定事实必须由 `sourceRefs` 指向输入来源；
+9. `BLOCKED_BY_CLARIFICATION` 需求可以没有验收条件，但必须关联至少一个待澄清项；
+10. 系统不得以默认值补充业务阈值、角色、权限或异常规则。
 
-## 8. 校验规则
+## 6. 核心处理策略
 
-| 规则编号 | 规则 | 失败级别 | 对应验收条件 |
-|---|---|---|---|
-| VAL-001 | 所有实体标识在各自集合内唯一且非空 | error | AC-FR002-01, AC-FR005-01 |
-| VAL-002 | 可实施需求至少关联一条验收条件 | error | AC-FR003-01, AC-FR006-03 |
-| VAL-003 | 验收条件引用的需求必须存在且仅有一个 | error | AC-FR003-05 |
-| VAL-004 | 验收条件包含前置、触发、可观察结果 | error | AC-FR003-02, AC-FR003-03 |
-| VAL-005 | 确定性需求至少包含一个有效来源引用 | error | AC-FR002-04 |
-| VAL-006 | 待澄清项包含问题和影响 | error | AC-FR005-01 |
-| VAL-007 | 所有必需输出集合存在，允许为空但不可缺失 | error | AC-FR006-01 |
-| VAL-008 | 空输入不产生具体业务需求或规则 | error | AC-FR001-02 |
-| VAL-009 | 模糊或冲突事实具有对应待澄清项 | warning | AC-FR002-05 |
-| VAL-010 | 无已知依赖时不生成推断依赖 | error | AC-FR004-01 |
+### 6.1 文本分析器抽象
 
-校验器只做可确定执行的结构和引用检查。“原子性”与“是否保持原意”需要分析器提供证据，并通过测试样例或人工评审补充验证。
+为避免架构绑定具体实现，定义统一端口：
 
-## 9. 关键流程
-
-### 9.1 正常输入
-
-```text
-调用方 -> ApplicationService: AnalyzeCommand
-ApplicationService -> InputNormalizer: normalize
-ApplicationService -> RequirementDecomposer: decompose
-ApplicationService -> DependencyDetector: detect
-ApplicationService -> CriteriaGenerator: generate
-ApplicationService -> ClarificationManager: consolidate
-ApplicationService -> ResultAssembler: assemble
-ApplicationService -> AnalysisValidator: validate
-ApplicationService --> 调用方: AnalysisResult
+```ts
+interface TextAnalysisEngine {
+  extractRequirements(sourceText: string): RequirementCandidate[];
+  generateCriteria(requirement: Requirement, sourceText: string): CriterionCandidate[];
+  extractDependencies(sourceText: string): DependencyCandidate[];
+  identifyGaps(sourceText: string, draft: AnalysisDraft): GapCandidate[];
+}
 ```
 
-### 9.2 空输入
+可选实现：
 
-1. `InputNormalizer` 将缺失、空串或纯空白统一为 `isEmpty = true`。
-2. 编排器跳过业务需求拆解和验收条件生成。
-3. `ClarificationManager` 生成至少覆盖原始需求、目标角色、场景、范围、规则、非功能约束的问题。
-4. 依赖输出为“无已知依赖”，除非调用方显式提供依赖。
-5. 返回 `needs_clarification`，需求和验收条件集合为空。
+- `RuleBasedTextAnalysisEngine`：适合格式固定、规则明确的输入；
+- `ModelBackedTextAnalysisEngine`：适合自由文本，但其输出必须经过 schema 校验、来源校验和结果一致性校验。
 
-### 9.3 候选结果不完整
+应用服务只依赖接口，不直接依赖具体分析技术。
 
-1. 校验器返回 `severity = error` 的问题。
-2. 结果不写入可选仓储。
-3. 协议适配器返回 `INVALID_ANALYSIS_RESULT`，并记录规则编号，不向调用方暴露供应商内部信息。
+### 6.2 标识生成
 
-## 10. 组件错误契约
+在单次分析内按输出顺序生成：
 
-领域端口使用稳定错误码，适配器负责映射为 HTTP 或其他协议状态。
+- 需求：`FR-001` 起；
+- 验收条件：`AC-{去掉 FR 中连字符后的需求号}-01`，例如 `AC-FR001-01`；
+- 依赖：`DEP-001` 起；
+- 待澄清项：`Q-001` 起。
 
-| 错误码 | 产生位置 | 含义 | 可重试 |
-|---|---|---|---|
-| `INVALID_REQUEST` | 输入适配器 | 字段类型或枚举非法 | 否，修改输入后重试 |
-| `ANALYZER_UNAVAILABLE` | 分析器适配器 | 可选分析实现不可用 | 是 |
-| `INVALID_ANALYSIS_RESULT` | 校验器 | 候选结果违反领域不变量 | 否，修复分析实现 |
-| `PERSISTENCE_FAILURE` | 可选仓储 | 保存或读取失败 | 取决于实现 |
-| `ANALYSIS_NOT_FOUND` | 可选仓储 | 指定结果不存在 | 否 |
+标识只保证单次 `analysisId` 范围内唯一。若未来支持分析版本比较，应另行增加稳定实体 ID 和版本号，不复用当前顺序 ID 承担跨版本身份。
 
-空业务文本属于有效但信息不足的分析输入，不使用 `INVALID_REQUEST`。
+### 6.3 防臆造控制
 
-## 11. 实现建议
+- 每项正式需求必须具有非空 `sourceRefs`；
+- 分析引擎输出只作为候选，必须经过结构与来源校验；
+- 无来源、冲突或不确定的候选转为 `Clarification`，不得静默进入正式需求；
+- 日志记录分析器版本和失败原因，但不得把未确认候选作为成功结果返回。
 
-建议首版采用单体模块化服务：
+## 7. 关键时序
 
 ```text
-src/
-  application/analysis-service
-  domain/model
-  domain/services
-  domain/ports
-  adapters/inbound
-  adapters/analyzer
-  adapters/persistence        # 确认需要历史记录后再添加
+Client -> API: POST request
+API -> InputValidator: validate(request)
+alt 输入无效
+  API --> Client: 400/422 ErrorResponse
+else 输入有效
+  API -> AnalysisService: analyze(request)
+  AnalysisService -> RequirementDecomposer: decompose(context)
+  AnalysisService -> AcceptanceCriteriaGenerator: generate(each requirement)
+  AnalysisService -> DependencyExtractor: extract(context)
+  AnalysisService -> ClarificationCollector: collect(context, draft)
+  AnalysisService -> TraceabilityBuilder: build(...)
+  AnalysisService -> ResultValidator: validate(result)
+  alt 结果不一致
+    AnalysisService --> API: RESULT_INCONSISTENT
+    API --> Client: 500 ErrorResponse
+  else 结果有效
+    AnalysisService --> API: AnalysisResult
+    API --> Client: 200 AnalysisResult
+  end
+end
 ```
 
-最小可交付实现只需要：一个调用适配器、一个 `AnalysisService`、分析端口实现、领域校验器和 DTO 序列化。暂不引入数据库、消息队列或微服务拆分。
+## 8. 部署、存储与可观测性
 
-## 12. 测试设计
+### 8.1 部署
 
-| 测试层级 | 必测内容 |
+- 首版：单进程、无状态 HTTP 服务；
+- 可水平扩展，实例间不共享会话；
+- 若采用外部模型或规则服务，通过基础设施适配器调用，并设置超时与有限重试；对非幂等外部调用不自动重试。
+
+### 8.2 存储
+
+首版不要求持久化。调用方负责保存响应。若后续要求审计或历史查询，可新增 `AnalysisRepository`：
+
+```ts
+interface AnalysisRepository {
+  save(result: AnalysisResult): void;
+  findById(analysisId: string): AnalysisResult | null;
+}
+```
+
+仓储是可选适配器，不得成为核心分析流程的隐式依赖。
+
+### 8.3 可观测性
+
+最低记录：
+
+- `analysisId`、请求追踪 ID、处理耗时、结果计数、错误代码、分析器版本；
+- 默认不记录完整 `sourceText`，避免业务文本或敏感信息进入日志；
+- 指标：请求数、成功率、输入错误率、内部一致性失败率、处理时延；
+- 不声明具体 SLA 或阈值，等待非功能要求确认。
+
+## 9. 安全与健壮性基线
+
+- 对请求体大小设置可配置上限；具体值待非功能要求确认；
+- 将输入作为数据处理，禁止其直接控制系统配置、工具调用或代码执行；
+- 输出采用严格 schema 校验并进行 JSON 转义；
+- 外部分析器凭据通过运行环境密钥注入，不写入源码或日志；
+- 错误响应不暴露堆栈、凭据或内部模型原始响应；
+- 身份认证、授权、数据保留期限因需求未提供，标记为待确认，不在本设计中假设。
+
+## 10. 需求追踪
+
+| 需求 | 架构实现点 |
 |---|---|
-| 单元测试 | 空白规范化、ID 唯一性、孤立验收条件、可实施需求无验收条件、无来源事实、澄清项字段完整性 |
-| 契约测试 | 请求/响应字段、枚举、错误码、空集合仍被序列化 |
-| 组件测试 | 非空输入完整流程、空输入短路流程、分析器不可用、候选结果校验失败 |
-| 追踪测试 | FR-001 至 FR-006 的每条验收条件至少映射一个测试用例 |
+| FR-001 | Analysis API、Input Validator、422 错误契约 |
+| FR-002 | Requirement Decomposer、来源引用、标识生成、模型不变量 |
+| FR-003 | Acceptance Criteria Generator、Given/When/Then 模型、Result Validator |
+| FR-004 | Dependency Extractor、Dependency/DependencyState 模型 |
+| FR-005 | Clarification Collector、Clarification 模型、防臆造控制 |
+| FR-006 | AnalysisResult、Traceability Builder、结果一致性校验 |
 
-在具体业务输入可用后，应增加正常、异常、边界及歧义样例集，验证拆解质量和原意保持。
+## 11. 实施切分
 
-## 13. 需求追踪矩阵
+1. 定义请求、响应、错误及领域模型；
+2. 实现 Input Validator 与 Result Validator；
+3. 实现 AnalysisService 编排和内存标识生成器；
+4. 实现一个 `TextAnalysisEngine` 适配器；
+5. 实现各领域模块，将候选输出转换为受约束模型；
+6. 暴露 `POST /v1/requirement-analyses`；
+7. 增加契约测试、模块单元测试和端到端测试。
 
-| 需求 | 主要模块 | 接口/模型 | 校验或流程 |
-|---|---|---|---|
-| FR-001 | `InputNormalizer`, `AnalysisApplicationService` | `AnalyzeCommand`, `NormalizedInput` | 空输入流程、VAL-008 |
-| FR-002 | `RequirementDecomposer` | `Requirement`, `SourceReference` | VAL-001, VAL-005, VAL-009 |
-| FR-003 | `AcceptanceCriteriaGenerator` | `AcceptanceCriterion` | VAL-002, VAL-003, VAL-004 |
-| FR-004 | `DependencyDetector` | `Dependency` | VAL-010 |
-| FR-005 | `ClarificationManager` | `Clarification` | VAL-006, 空输入流程 |
-| FR-006 | `ResultAssembler`, `AnalysisValidator` | `AnalysisResult` | VAL-007、完整流程 |
+最低测试集：
 
-## 14. 架构决策与待澄清项
+- 空、缺失和仅空白 `sourceText` 返回 422，且不生成业务需求；
+- 有效输入返回完整必需字段；
+- 多行为输入拆为具有唯一 ID 的多个需求；
+- 每个可实施需求至少关联一项验收条件；
+- 悬空引用、重复 ID、空 Given/When/Then 被结果校验器拒绝；
+- 无依赖时状态正确，有待确认依赖时产生待澄清项；
+- 无来源候选不能成为正式需求；
+- 追踪矩阵与需求、验收条件实际关系一致。
 
-### 已确定
+## 12. 待确认与风险
 
-- 采用模块化单体作为首版逻辑边界。
-- 核心分析能力、传输协议和基础设施通过接口解耦。
-- 分析结果必须先通过确定性校验再返回或持久化。
-- 当前依赖状态为“无已知依赖”。
+| 项目 | 当前处理 | 风险 |
+|---|---|---|
+| 具体业务领域 | 不作假设 | 无法定义领域专用模块、术语和规则 |
+| 分析引擎选型 | 通过 `TextAnalysisEngine` 隔离 | 不同引擎的准确性、成本和延迟未知 |
+| 性能/SLA | 不设虚构阈值 | 无法确定同步接口是否长期适用 |
+| 认证与授权 | 未设计具体机制 | 对外开放前必须补充访问控制要求 |
+| 数据敏感级别与保留 | 默认日志不记录原文、首版不持久化 | 无法确认合规措施是否充分 |
+| 字符区间规范 | 规定 Unicode code point | 各语言实现若使用 UTF-16 下标需显式转换 |
 
-### 尚待确认
+## 13. 架构验收
 
-- **ARC-Q-001 运行形态**：库、命令行、HTTP 服务或现有系统内模块；影响入站适配器。
-- **ARC-Q-002 分析实现**：规则、人工、模型或混合方式；影响准确性、成本及故障处理。
-- **ARC-Q-003 持久化**：是否需要历史查询、审计和版本管理；影响仓储与查询接口。
-- **ARC-Q-004 安全与合规**：输入是否包含敏感数据及保留策略；影响脱敏、访问控制和日志。
-- **ARC-Q-005 非功能指标**：吞吐、延迟、可用性和结果规模；影响部署和容量设计。
-- **ARC-Q-006 语言与格式**：是否只处理中文及是否需要 Markdown/JSON 双输出；影响解析与序列化。
-
-## 15. 交付状态
-
-- [x] 已定义系统边界和模块职责。
-- [x] 已定义应用、领域和可选基础设施接口。
-- [x] 已定义输入、输出、实体、枚举和错误数据模型。
-- [x] 已定义关键流程、领域不变量和错误契约。
-- [x] 已建立 FR-001 至 FR-006 的架构追踪。
-- [x] 未把未确认的业务规则或外部依赖写成既定事实。
+- [x] 已定义总体架构和模块边界；
+- [x] 已为核心模块定义显式接口；
+- [x] 已定义 HTTP 请求、成功响应和错误响应；
+- [x] 已定义数据模型、枚举、引用及一致性约束；
+- [x] 已追踪 FR-001～FR-006；
+- [x] 已记录未知项，未虚构具体业务规则或非功能阈值。
 
 **交付状态：`architecture_written = 通过`。**
