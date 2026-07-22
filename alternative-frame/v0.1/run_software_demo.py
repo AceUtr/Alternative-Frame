@@ -1,7 +1,7 @@
 from core.main_agent import MainAgent
 from core.agents import AgentRegistry, DeterministicAgent
 from core.orchestrator import Orchestrator
-
+from domains.software_demo import build
 
 def software_handler(task, context):
 
@@ -40,19 +40,9 @@ def main():
         )
     )
 
-    registry.register(
-        DeterministicAgent(
-            role="developer",
-            handler=software_handler
-        )
-    )
+    
 
-    registry.register(
-        DeterministicAgent(
-            role="reviewer",
-            handler=software_handler
-        )
-    )
+    
 
 
     orchestrator = Orchestrator(
@@ -62,6 +52,7 @@ def main():
 
     agent = MainAgent(
         orchestrator
+        planner=build
     )
 
 
