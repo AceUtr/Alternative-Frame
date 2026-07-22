@@ -4,42 +4,69 @@ from core.orchestrator import Orchestrator
 
 
 def software_handler(task, context):
-    print(f"Executing: {task.description}")
+
+    print("\n[Agent executing]")
+    print("Task:", task.description)
 
     return (
-        f"Completed software engineering task: "
-        f"{task.description}"
+        f"Finished task: {task.description}"
     )
 
 
 def main():
 
-    # 注册 Agent
     registry = AgentRegistry()
 
-    software_agent = DeterministicAgent(
-        role="software_engineer",
-        handler=software_handler
+
+    # 软件工程Agent
+    registry.register(
+        DeterministicAgent(
+            role="analyst",
+            handler=software_handler
+        )
     )
 
-    registry.register(software_agent)
+    registry.register(
+        DeterministicAgent(
+            role="architect",
+            handler=software_handler
+        )
+    )
+
+    registry.register(
+        DeterministicAgent(
+            role="tester",
+            handler=software_handler
+        )
+    )
+
+    registry.register(
+        DeterministicAgent(
+            role="developer",
+            handler=software_handler
+        )
+    )
+
+    registry.register(
+        DeterministicAgent(
+            role="reviewer",
+            handler=software_handler
+        )
+    )
 
 
-    # 创建 Orchestrator
     orchestrator = Orchestrator(
-        registry=registry
+        registry
     )
 
 
-    # 创建 MainAgent
     agent = MainAgent(
-        orchestrator=orchestrator
+        orchestrator
     )
 
 
-    # 输入软件工程任务
     goal = """
-    Analyze calculator project,
+    Analyze software project,
     find bugs,
     modify code,
     run tests.
@@ -49,18 +76,21 @@ def main():
     report = agent.execute(goal)
 
 
-    print("\n===== Result =====")
+    print("\n========== REPORT ==========")
 
-    print("Status:",
-          report.status)
+    print(
+        "Status:",
+        report.status
+    )
 
-    for task_id, result in report.results.items():
 
-        print("\nTask:",
-              task_id)
+    for task_id,result in report.results.items():
 
-        print(result.summary)
-
+        print(
+            task_id,
+            ":",
+            result.summary
+        )
 
 
 if __name__ == "__main__":
