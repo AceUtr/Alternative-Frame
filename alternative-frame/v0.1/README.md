@@ -82,3 +82,5 @@ API 与本地 Stub 的长程模式都会在执行前弹出合同预览窗口。�
 长程模式现支持阶段边界安全暂停、持久化恢复和运行历史窗口。暂停不会强杀正在执行的 Agent，而是在当前阶段结束并保存证据后停止。恢复时加载冻结的目标、合同、阶段记录和 pending plan。详见 [`docs/milestone-6-contract-planning-resume.md`](docs/milestone-6-contract-planning-resume.md)。
 
 真实模型两阶段验收可运行 `python run_real_two_phase_demo.py`。该脚本受控遗漏 `FINAL_EVIDENCE.md`，要求 GlobalEvaluator 在第一阶段拒绝完成并触发 StructuredReplanner，最终必须在后续阶段补齐证据才返回成功。API Key 只从环境变量读取且不会落盘。
+
+任务级执行现采用反馈驱动重试：Agent 会收到完整产物路径、工具权限和验收检查；验收失败后，下一次尝试会获得缺失文件、精确测试命令或证据缺口等结构化修复指令。文件验收同时要求本次任务运行的工具产物来源，旧文件不能直接通过。详见 [`docs/milestone-7-feedback-driven-retry.md`](docs/milestone-7-feedback-driven-retry.md)。

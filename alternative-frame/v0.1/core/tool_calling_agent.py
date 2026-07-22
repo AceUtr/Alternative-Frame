@@ -47,7 +47,29 @@ class ToolCallingAgent(Agent):
             "3. Return a concise final response with: completed work, artifact paths, checks run, and remaining risks.\n"
             "4. Never repeat the same tool call with identical arguments unless the previous result failed and you changed the plan."
         )
-        messages = [{"role": "system", "content": self.system_prompt + protocol}, {"role": "user", "content": json.dumps({"task": task.description, "acceptance": task.acceptance, "dependencies": {k: v.summary for k, v in context.items()},}, ensure_ascii=False)}]
+        task_contract = {
+            "task_id": task.id,
+            "role": task.role,
+            "description": task.description,
+            "required_tools": list(task.metadata.get("required_tools", [])),
+            "expected_outputs": list(task.metadata.get("expected_outputs", [])),
+            "acceptance_checks": list(task.metadata.get("checks", [])),
+            "max_retries": task.max_retries,
+        }
+        payload = {
+            "task_contract": task_contract,
+            "dependencies": {key: value.summary for key, value in context.items()},
+            "retry_feedback": task.metadata.get("retry_feedback"),
+            "completion_rules": [
+                "Create every declared expected output at its exact relative path.",
+                "Execute every command check exactly as written and retain exit-code evidence.",
+                "Do not claim completion from prose alone.",
+            ],
+        }
+        messages = [
+            {"role": "system", "content": self.system_prompt + protocol},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
         evidence, artifacts, tool_records = [], [], []
         call_counts = {}
         for step in range(self.max_steps):

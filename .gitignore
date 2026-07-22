@@ -1,6 +1,8 @@
 # Local tooling and caches
 .agents/
 .pytest_cache/
+.pytest_tmp/
+.pytest_retry_tmp/
 .vscode/
 tmp/
 word/

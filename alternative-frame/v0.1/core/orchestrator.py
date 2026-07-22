@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Callable, Dict, Iterable, List, Mapping
@@ -9,6 +10,7 @@ import time
 from .agents import AgentRegistry
 from .acceptance import AcceptanceEvaluator
 from .models import AgentResult, Plan, SubTask, utc_now
+from .retry import RetryFailureClassifier
 
 
 @dataclass
@@ -27,11 +29,12 @@ class RunReport:
 class Orchestrator:
     """Centralized Main Agent coordinator with dependency-aware parallelism."""
 
-    def __init__(self, registry: AgentRegistry, max_workers: int = 4, on_event: Callable | None = None, acceptance: AcceptanceEvaluator | None = None) -> None:
+    def __init__(self, registry: AgentRegistry, max_workers: int = 4, on_event: Callable | None = None, acceptance: AcceptanceEvaluator | None = None, retry_classifier: RetryFailureClassifier | None = None) -> None:
         self.registry = registry
         self.max_workers = max_workers
         self.on_event = on_event
         self.acceptance = acceptance
+        self.retry_classifier = retry_classifier or RetryFailureClassifier()
         self._lock = Lock()
 
     def _emit(self, event: str, task: SubTask, result=None) -> None:
@@ -84,21 +87,43 @@ class Orchestrator:
     def _run_with_retry(self, task: SubTask, current: Mapping[str, AgentResult]):
         agent = self.registry.get(task.role)
         last = None
+        accumulated_artifacts = []
+        accumulated_evidence = []
+        accumulated_tool_records = []
+        retry_feedback = None
         for attempt in range(1, task.max_retries + 2):
-            self._emit("task_started", task)
-            last = agent.run(task, dict(current))
+            attempt_task = deepcopy(task)
+            attempt_task.metadata["runtime_attempt"] = attempt
+            if retry_feedback:
+                attempt_task.metadata["retry_feedback"] = retry_feedback.to_dict()
+            self._emit("task_started", attempt_task)
+            try:
+                last = agent.run(attempt_task, dict(current))
+            except Exception as exc:
+                last = AgentResult(
+                    task.id,
+                    "failed",
+                    summary="Agent execution raised an exception",
+                    failures=[f"agent_exception: {type(exc).__name__}: {exc}"],
+                )
             last.attempts = attempt
+            accumulated_artifacts.extend(last.artifacts)
+            accumulated_evidence.extend(last.evidence)
+            accumulated_tool_records.extend(last.tool_records)
+            last.artifacts = list(dict.fromkeys(accumulated_artifacts))
+            last.evidence = list(dict.fromkeys(accumulated_evidence))
+            last.tool_records = list(accumulated_tool_records)
             if self.acceptance:
-                acceptance = self.acceptance.evaluate(task, last)
+                acceptance = self.acceptance.evaluate(attempt_task, last)
                 last.evidence.extend(acceptance.checks)
                 if not acceptance.passed:
                     last.status = "failed"
                     last.failures.extend(acceptance.failures)
-            self._emit("task_finished", task, last)
+            self._emit("task_finished", attempt_task, last)
             if last.status == "success":
                 return task, last
-            if any(code in last.failures for code in ("max_tool_steps_exceeded", "repeated_tool_call")):
-                # Retrying the same unchanged plan would repeat the same costly
-                # model/tool loop. Surface it to MainAgent for replanning.
+            if attempt > task.max_retries or not self.retry_classifier.retryable(last):
                 return task, last
+            retry_feedback = self.retry_classifier.build_feedback(task, last, attempt + 1)
+            self._emit("task_retry_scheduled", attempt_task, last)
         return task, last

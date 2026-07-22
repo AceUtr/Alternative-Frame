@@ -716,7 +716,10 @@ class FreshUI(tk.Tk):
             )
 
             def on_event(event, task, result=None):
-                self.events.put(("task_event", (event, task.id, result)))
+                self.events.put((
+                    "task_event",
+                    (event, task.id, result, task.metadata.get("runtime_attempt")),
+                ))
 
             evaluator = AcceptanceEvaluator(workspace=workspace, execute_commands=tool_test) if client else None
             orchestrator = Orchestrator(registry, max_workers=4, on_event=on_event, acceptance=evaluator)
@@ -902,19 +905,30 @@ class FreshUI(tk.Tk):
         self._set_state(f"完成 · {report.status} · {report.rounds} 轮", color)
 
     def _show_task_event(self, payload):
-        event, task_id, result = payload
+        event, task_id, result, runtime_attempt = payload
         item = self.task_items.get(task_id)
-        if not item:
-            return
-        vals = list(self.tree.item(item, "values"))
+        vals = list(self.tree.item(item, "values")) if item else []
         if event == "task_started":
-            vals[3] = "执行中"
-            self.append_log(f"{task_id} → 子 Agent 开始执行")
+            if item:
+                vals[3] = "执行中"
+                vals[4] = runtime_attempt or "?"
+            self.append_log(f"{task_id} → 子 Agent 开始执行" + (f" · attempt={runtime_attempt}" if runtime_attempt else ""))
         elif event == "task_finished" and result is not None:
-            vals[3] = result.status
-            vals[4] = result.attempts
+            if item:
+                vals[3] = result.status
+                vals[4] = result.attempts
             self.append_log(f"{task_id} → {result.status}")
-        self.tree.item(item, values=vals)
+        elif event == "task_retry_scheduled" and result is not None:
+            reason = "; ".join(result.failures[:3]) or result.status
+            self.append_log(
+                f"RETRY → {task_id} · 第 {result.attempts} 次未通过 · "
+                f"下一次将携带失败反馈 · {self._compact(reason, 260)}"
+            )
+            if item:
+                vals[3] = "准备重试"
+                vals[4] = result.attempts
+        if item and vals:
+            self.tree.item(item, values=vals)
 
     def _show_tool_event(self, payload):
         event, detail = payload

@@ -22,6 +22,7 @@ class FakeToolCallingClient:
         self.calls = 0
 
     def chat(self, messages, tools=None):
+        self.last_messages = messages
         self.calls += 1
         if self.calls == 1:
             return {
@@ -66,6 +67,37 @@ def test_tool_agent_writes_inside_workspace_and_emits_events(tmp_path):
     assert result.tool_records[0]["metadata"]["artifacts"] == ["hello.py"]
     assert [event for event, _ in events] == ["tool_started", "tool_finished"]
     assert events[-1][1]["success"] is True
+
+
+def test_tool_agent_receives_full_task_contract_and_retry_feedback(tmp_path):
+    client = FakeToolCallingClient()
+    agent = ToolCallingAgent(
+        "developer",
+        client,
+        ToolRegistry([FileEditor(tmp_path)]),
+        "Use tools.",
+    )
+    task = SubTask(
+        "requirements",
+        "developer",
+        "write requirements",
+        metadata={
+            "required_tools": ["file_editor"],
+            "expected_outputs": ["requirements.md"],
+            "checks": [{"id": "requirements_written", "check_type": "file_exists"}],
+            "retry_feedback": {"category": "missing_artifact", "failures": ["requirements.md missing"]},
+        },
+    )
+
+    agent.run(task, {})
+
+    import json
+
+    payload = json.loads(client.last_messages[1]["content"])
+    assert payload["task_contract"]["expected_outputs"] == ["requirements.md"]
+    assert payload["task_contract"]["required_tools"] == ["file_editor"]
+    assert payload["task_contract"]["acceptance_checks"][0]["id"] == "requirements_written"
+    assert payload["retry_feedback"]["category"] == "missing_artifact"
 
 
 def test_file_editor_rejects_workspace_escape(tmp_path):

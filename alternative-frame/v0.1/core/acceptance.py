@@ -51,12 +51,25 @@ class AcceptanceEvaluator:
                     ok, detail = self._run_command(command)
                     (passed if ok else failures).append(f"{check_id}: {detail}")
             elif check_type == "file_exists":
-                expected = task.metadata.get("expected_outputs", [])
+                expected = [check["path"]] if check.get("path") else task.metadata.get("expected_outputs", [])
                 missing = [p for p in expected if not (self.workspace / p).exists()]
                 if missing:
                     failures.append(f"{check_id}: missing_artifacts={missing}")
                 else:
-                    passed.append(f"{check_id}: artifacts_exist")
+                    recorded = {self._normalize_path(path) for path in result.artifacts}
+                    for record in result.tool_records:
+                        if record.get("success") is True:
+                            recorded.update(
+                                self._normalize_path(path)
+                                for path in record.get("metadata", {}).get("artifacts", [])
+                            )
+                    missing_provenance = [
+                        path for path in expected if not self._has_artifact_provenance(path, recorded)
+                    ]
+                    if missing_provenance:
+                        failures.append(f"{check_id}: missing_run_provenance={missing_provenance}")
+                    else:
+                        passed.append(f"{check_id}: artifacts_exist_with_run_provenance")
             elif check_type == "metric":
                 if any(token in content for token in ("metric", "指标", "experiment", "实验", "baseline", "基线")):
                     passed.append(f"{check_id}: evidence_present")
@@ -75,6 +88,20 @@ class AcceptanceEvaluator:
     @staticmethod
     def _normalize_command(command):
         return " ".join(str(command or "").split()).strip().lower()
+
+    @staticmethod
+    def _normalize_path(path):
+        return str(path or "").replace("\\", "/").strip().rstrip("/")
+
+    @classmethod
+    def _has_artifact_provenance(cls, expected, recorded):
+        normalized = cls._normalize_path(expected)
+        if normalized in recorded:
+            return True
+        # Directory outputs such as tests/ are proven by any artifact written below them.
+        return str(expected).replace("\\", "/").strip().endswith("/") and any(
+            artifact.startswith(normalized + "/") for artifact in recorded
+        )
 
     def _run_command(self, command: str):
         try:
