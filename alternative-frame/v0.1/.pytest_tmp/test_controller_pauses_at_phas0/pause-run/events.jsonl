@@ -1,0 +1,8 @@
+{"time": "2026-07-22T08:03:43.261112+00:00", "event": "run_started", "payload": {"resume": false}}
+{"time": "2026-07-22T08:03:43.262379+00:00", "event": "phase_planned", "payload": {"phase": 1, "plan_goal": "first", "tasks": [{"id": "first", "role": "worker", "depends_on": []}]}}
+{"time": "2026-07-22T08:03:43.263760+00:00", "event": "phase_finished", "payload": {"phase": 1, "completed": false, "reason": "implementation exists but verification is missing", "satisfied_criteria": [], "missing_criteria": [], "failures": [], "next_focus": ["verify"], "evidence": []}}
+{"time": "2026-07-22T08:03:43.264908+00:00", "event": "run_paused", "payload": {"phase": 1, "boundary": "after_phase"}}
+{"time": "2026-07-22T08:03:43.274172+00:00", "event": "run_started", "payload": {"resume": true}}
+{"time": "2026-07-22T08:03:43.275464+00:00", "event": "phase_planned", "payload": {"phase": 2, "plan_goal": "second", "tasks": [{"id": "second", "role": "worker", "depends_on": []}]}}
+{"time": "2026-07-22T08:03:43.276786+00:00", "event": "phase_finished", "payload": {"phase": 2, "completed": true, "reason": "implementation and verification phases passed", "satisfied_criteria": [], "missing_criteria": [], "failures": [], "next_focus": [], "evidence": ["verified=true"]}}
+{"time": "2026-07-22T08:03:43.278275+00:00", "event": "run_completed", "payload": {"phase": 2}}

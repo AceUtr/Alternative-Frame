@@ -1,0 +1,93 @@
+{
+  "run_id": "pause-run",
+  "goal": "pause goal",
+  "max_phases": 3,
+  "max_total_tasks": 50,
+  "status": "completed",
+  "phase": 2,
+  "total_tasks": 2,
+  "completed_tasks": [
+    "phase-1:first",
+    "phase-2:second"
+  ],
+  "failed_tasks": [],
+  "artifacts": [
+    "artifact://first",
+    "artifact://second"
+  ],
+  "evidence_records": [],
+  "acceptance_contract": null,
+  "decisions": [
+    "phase 1: continue - implementation exists but verification is missing",
+    "phase 2: final goal accepted - implementation and verification phases passed"
+  ],
+  "phases": [
+    {
+      "number": 1,
+      "plan_goal": "first",
+      "task_ids": [
+        "first"
+      ],
+      "status": "incomplete",
+      "report_status": "success",
+      "evaluation": {
+        "completed": false,
+        "reason": "implementation exists but verification is missing",
+        "satisfied_criteria": [],
+        "missing_criteria": [],
+        "failures": [],
+        "next_focus": [
+          "verify"
+        ],
+        "evidence": []
+      },
+      "failures": [],
+      "artifacts": [
+        "artifact://first"
+      ],
+      "started_at": "2026-07-22T08:03:43.262566+00:00",
+      "finished_at": "2026-07-22T08:03:43.262590+00:00"
+    },
+    {
+      "number": 2,
+      "plan_goal": "second",
+      "task_ids": [
+        "second"
+      ],
+      "status": "accepted",
+      "report_status": "success",
+      "evaluation": {
+        "completed": true,
+        "reason": "implementation and verification phases passed",
+        "satisfied_criteria": [],
+        "missing_criteria": [],
+        "failures": [],
+        "next_focus": [],
+        "evidence": [
+          "verified=true"
+        ]
+      },
+      "failures": [],
+      "artifacts": [
+        "artifact://second"
+      ],
+      "started_at": "2026-07-22T08:03:43.275651+00:00",
+      "finished_at": "2026-07-22T08:03:43.275680+00:00"
+    }
+  ],
+  "pending_plan": null,
+  "last_evaluation": {
+    "completed": true,
+    "reason": "implementation and verification phases passed",
+    "satisfied_criteria": [],
+    "missing_criteria": [],
+    "failures": [],
+    "next_focus": [],
+    "evidence": [
+      "verified=true"
+    ]
+  },
+  "last_error": null,
+  "created_at": "2026-07-22T08:03:43.260111+00:00",
+  "updated_at": "2026-07-22T08:03:43.277009+00:00"
+}

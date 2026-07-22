@@ -1,0 +1,101 @@
+{
+  "run_id": "dynamic-recovery",
+  "goal": "repair the software service",
+  "max_phases": 3,
+  "max_total_tasks": 50,
+  "status": "completed",
+  "phase": 2,
+  "total_tasks": 3,
+  "completed_tasks": [
+    "phase-2:diagnose",
+    "phase-2:verify"
+  ],
+  "failed_tasks": [
+    "phase-1:initial"
+  ],
+  "artifacts": [
+    "artifact://diagnose",
+    "artifact://verify"
+  ],
+  "evidence_records": [],
+  "acceptance_contract": null,
+  "decisions": [
+    "phase 1: continue - phase execution or acceptance failed",
+    "phase 2: final goal accepted - all phase tasks and their acceptance checks passed"
+  ],
+  "phases": [
+    {
+      "number": 1,
+      "plan_goal": "initial phase",
+      "task_ids": [
+        "initial"
+      ],
+      "status": "incomplete",
+      "report_status": "failed",
+      "evaluation": {
+        "completed": false,
+        "reason": "phase execution or acceptance failed",
+        "satisfied_criteria": [],
+        "missing_criteria": [],
+        "failures": [
+          "initial: initial implementation failed"
+        ],
+        "next_focus": [
+          "analyze failed tasks and produce a revised phase plan"
+        ],
+        "evidence": [
+          "phase_report_status=failed"
+        ]
+      },
+      "failures": [
+        "initial: initial implementation failed"
+      ],
+      "artifacts": [],
+      "started_at": "2026-07-22T08:03:43.316404+00:00",
+      "finished_at": "2026-07-22T08:03:43.316433+00:00"
+    },
+    {
+      "number": 2,
+      "plan_goal": "diagnose, repair, and verify the failed service",
+      "task_ids": [
+        "diagnose",
+        "verify"
+      ],
+      "status": "accepted",
+      "report_status": "success",
+      "evaluation": {
+        "completed": true,
+        "reason": "all phase tasks and their acceptance checks passed",
+        "satisfied_criteria": [],
+        "missing_criteria": [],
+        "failures": [],
+        "next_focus": [],
+        "evidence": [
+          "phase_tasks_passed=2"
+        ]
+      },
+      "failures": [],
+      "artifacts": [
+        "artifact://diagnose",
+        "artifact://verify"
+      ],
+      "started_at": "2026-07-22T08:03:43.319214+00:00",
+      "finished_at": "2026-07-22T08:03:43.319247+00:00"
+    }
+  ],
+  "pending_plan": null,
+  "last_evaluation": {
+    "completed": true,
+    "reason": "all phase tasks and their acceptance checks passed",
+    "satisfied_criteria": [],
+    "missing_criteria": [],
+    "failures": [],
+    "next_focus": [],
+    "evidence": [
+      "phase_tasks_passed=2"
+    ]
+  },
+  "last_error": null,
+  "created_at": "2026-07-22T08:03:43.313780+00:00",
+  "updated_at": "2026-07-22T08:03:43.320540+00:00"
+}
