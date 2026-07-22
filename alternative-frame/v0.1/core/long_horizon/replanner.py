@@ -32,7 +32,7 @@ class StructuredReplanError(RuntimeError):
 
 class PlanValidator:
     TASK_ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
-    CHECK_TYPES = {"manual", "command", "file_exists", "metric"}
+    CHECK_TYPES = {"manual", "command", "file_exists", "metric", "semantic"}
 
     def __init__(self, role_tools: Optional[Mapping[str, Set[str]]] = None):
         source = role_tools or DEFAULT_ROLE_TOOLS
@@ -155,6 +155,7 @@ class StructuredReplanner:
                         "failed_tasks": state.failed_tasks,
                         "artifacts": state.artifacts,
                         "decisions": state.decisions[-10:],
+                        "acceptance_contract": state.acceptance_contract,
                         "previous_evaluation": evaluation.to_dict(),
                         "allowed_role_tools": {
                             role: sorted(tools) for role, tools in self.validator.role_tools.items()

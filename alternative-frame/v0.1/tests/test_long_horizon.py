@@ -42,6 +42,7 @@ def test_controller_replans_and_persists_two_phases(tmp_path):
         evaluator=CompleteOnSecondPhase(),
         replanner=replan,
         on_event=lambda event, payload: events.append(event),
+        acceptance_contract={"goal": "deliver a verified feature", "criteria": []},
     )
 
     report = controller.run("deliver a verified feature", run_id="two-phase")
@@ -54,6 +55,7 @@ def test_controller_replans_and_persists_two_phases(tmp_path):
     assert "run_completed" in events
     persisted = json.loads((tmp_path / "two-phase" / "state.json").read_text(encoding="utf-8"))
     assert persisted["status"] == "completed"
+    assert persisted["acceptance_contract"]["goal"] == "deliver a verified feature"
     assert (tmp_path / "two-phase" / "events.jsonl").is_file()
 
 
@@ -93,3 +95,42 @@ def test_controller_resumes_a_persisted_pending_phase(tmp_path):
     assert report.status == "completed"
     assert report.state.phase == 1
     assert report.state.completed_tasks == ["phase-1:resume-task"]
+
+
+def test_controller_pauses_at_phase_boundary_and_resumes(tmp_path):
+    controller = None
+
+    def on_event(event, _payload):
+        if event == "phase_finished":
+            controller.request_pause()
+
+    controller = LongHorizonController(
+        make_orchestrator(),
+        lambda _state: Plan("first", [SubTask("first", "worker", "first")]),
+        LongHorizonStore(tmp_path),
+        evaluator=CompleteOnSecondPhase(),
+        replanner=lambda _state, _evaluation: Plan("second", [SubTask("second", "worker", "second")]),
+        on_event=on_event,
+    )
+
+    paused = controller.run("pause goal", run_id="pause-run")
+    assert paused.status == "paused"
+    assert paused.state.phase == 1
+
+    controller.on_event = None
+    resumed = controller.run("pause goal", run_id="pause-run", resume=True)
+    assert resumed.status == "completed"
+    assert resumed.state.phase == 2
+
+
+def test_store_lists_newest_valid_runs_and_ignores_corrupt_entries(tmp_path):
+    store = LongHorizonStore(tmp_path)
+    older = LongHorizonState("older", "goal", 2, 5, updated_at="2026-01-01T00:00:00+00:00")
+    newer = LongHorizonState("newer", "goal", 2, 5, updated_at="2026-02-01T00:00:00+00:00")
+    store.save(older)
+    store.save(newer)
+    corrupt = tmp_path / "corrupt"
+    corrupt.mkdir()
+    (corrupt / "state.json").write_text("not-json", encoding="utf-8")
+
+    assert [state.run_id for state in store.list_runs()] == ["newer", "older"]

@@ -72,3 +72,13 @@ UI 的任务模式默认提供“标准多 Agent”和“长程任务”。“�
 API 模式下，长程任务的后续阶段由 `StructuredReplanner` 生成严格 JSON DAG，并在执行前校验角色、工具权限、路径、依赖、循环和剩余预算。本地 Stub 模式使用规则型恢复计划，确保离线可演示。
 
 API 长程模式使用 `StructuredGlobalEvaluator` 判断最终目标：必需文件要有本次运行的产物来源，测试命令必须精确匹配且退出码为 0，硬证据全部通过后才允许模型进行语义覆盖判断。模型返回无效或 API 不可用时采用 fail-closed，不会把任务误判为完成。详见 [`docs/milestone-4-global-completion.md`](docs/milestone-4-global-completion.md)。
+
+执行 API 长程任务前，`StructuredGoalContractGenerator` 会先从原始用户目标生成严格 JSON 验收合同。`ContractValidator` 校验必需条件、类型、相对路径、安全命令和指标阈值；合同连续两次不合法时会在任何 Agent 或工具执行前终止。合同会写入长程 `state.json`。详见 [`docs/milestone-5-goal-contract-generator.md`](docs/milestone-5-goal-contract-generator.md)。
+
+API 与本地 Stub 的长程模式都会在执行前弹出合同预览窗口。用户可以确认、取消，或编辑完整 JSON；编辑后必须重新通过原始目标、相对路径和安全命令校验。取消任务不会启动 LongHorizonController、子 Agent 或工具。标准单阶段多 Agent 模式暂不强制确认合同。
+
+合同确认后，`ContractAwarePlanner` 会根据合同重新构建初始 DAG，并要求每条必需标准都映射到具体负责的任务和检查；合同覆盖不完整、角色越权或路径不安全时不会开始执行。
+
+长程模式现支持阶段边界安全暂停、持久化恢复和运行历史窗口。暂停不会强杀正在执行的 Agent，而是在当前阶段结束并保存证据后停止。恢复时加载冻结的目标、合同、阶段记录和 pending plan。详见 [`docs/milestone-6-contract-planning-resume.md`](docs/milestone-6-contract-planning-resume.md)。
+
+真实模型两阶段验收可运行 `python run_real_two_phase_demo.py`。该脚本受控遗漏 `FINAL_EVIDENCE.md`，要求 GlobalEvaluator 在第一阶段拒绝完成并触发 StructuredReplanner，最终必须在后续阶段补齐证据才返回成功。API Key 只从环境变量读取且不会落盘。

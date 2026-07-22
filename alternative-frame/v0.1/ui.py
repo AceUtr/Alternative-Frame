@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import threading
@@ -14,10 +15,13 @@ from core.agents import AgentRegistry, DeterministicAgent
 from core.acceptance import AcceptanceEvaluator
 from core.long_horizon import (
     AcceptanceContract,
+    ContractAwarePlanner,
+    ContractValidator,
     LongHorizonController,
     LongHorizonStore,
     ReportStatusEvaluator,
     StructuredGlobalEvaluator,
+    StructuredGoalContractGenerator,
     StructuredReplanner,
 )
 from core.tool_calling_agent import ToolCallingAgent
@@ -49,6 +53,10 @@ PROJECT_DIR = Path(__file__).resolve().parent
 TOOL_TEST_WORKSPACE = PROJECT_DIR / "tool_test_workspace"
 DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务")
 DEVELOPER_EXECUTION_MODES = ("工具调用自检", "失败修复自检")
+
+
+def long_horizon_runs_root() -> Path:
+    return Path(os.getenv("LONG_HORIZON_RUNS_DIR", str(PROJECT_DIR / "runs" / "long_horizon")))
 
 
 def build_registry(client=None, workspace=None, on_tool_event=None, tool_test: bool = False) -> AgentRegistry:
@@ -142,6 +150,260 @@ def build_recovery_plan(pipeline: PlanningPipeline, state, evaluation) -> Plan:
     return plan
 
 
+def validate_contract_json(text: str, expected_goal: str, validator=None) -> AcceptanceContract:
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise ValueError("验收合同必须是 JSON 对象")
+    contract = AcceptanceContract.from_dict(payload)
+    (validator or ContractValidator()).validate(contract, expected_goal=expected_goal)
+    return contract
+
+
+class ContractJsonEditor(tk.Toplevel):
+    def __init__(self, parent, contract, on_apply):
+        super().__init__(parent)
+        self.title("编辑验收合同 JSON")
+        self.geometry("760x620")
+        self.minsize(620, 480)
+        self.transient(parent)
+        self.configure(bg=COLORS["bg"])
+        self.contract = contract
+        self.on_apply = on_apply
+        self.protocol("WM_DELETE_WINDOW", self._close)
+
+        body = tk.Frame(self, bg=COLORS["bg"], padx=16, pady=14)
+        body.pack(fill=tk.BOTH, expand=True)
+        tk.Label(
+            body,
+            text="修改后必须重新通过安全校验；原始目标、路径和命令均不可绕过约束。",
+            bg=COLORS["bg"],
+            fg=COLORS["muted"],
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor=tk.W, pady=(0, 8))
+        self.editor = tk.Text(
+            body,
+            wrap=tk.NONE,
+            font=("Cascadia Mono", 9),
+            background="#F8FBFA",
+            foreground=COLORS["text"],
+            insertbackground=COLORS["mint_dark"],
+            highlightbackground=COLORS["line"],
+            highlightthickness=1,
+            padx=10,
+            pady=10,
+        )
+        self.editor.pack(fill=tk.BOTH, expand=True)
+        self.editor.insert("1.0", json.dumps(contract.to_dict(), ensure_ascii=False, indent=2))
+
+        buttons = tk.Frame(body, bg=COLORS["bg"])
+        buttons.pack(fill=tk.X, pady=(10, 0))
+        ttk.Button(buttons, text="取消", style="Soft.TButton", command=self._close).pack(side=tk.RIGHT)
+        ttk.Button(buttons, text="校验并应用修改", style="Accent.TButton", command=self._apply).pack(side=tk.RIGHT, padx=(0, 8))
+        self.grab_set()
+
+    def _apply(self):
+        try:
+            contract = validate_contract_json(
+                self.editor.get("1.0", tk.END),
+                expected_goal=self.contract.goal,
+            )
+        except Exception as exc:
+            messagebox.showerror("合同校验失败", str(exc), parent=self)
+            return
+        self.on_apply(contract)
+        self._close()
+
+    def _close(self):
+        parent = self.master
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
+        self.destroy()
+        if parent.winfo_exists():
+            parent.grab_set()
+            parent.focus_set()
+
+
+class ContractPreviewDialog(tk.Toplevel):
+    def __init__(self, parent, contract, reply_queue):
+        super().__init__(parent)
+        self.title("确认最终验收合同")
+        window_height = max(460, min(650, self.winfo_screenheight() - 140))
+        self.geometry(f"900x{window_height}")
+        self.minsize(700, 420)
+        self.transient(parent)
+        self.configure(bg=COLORS["bg"])
+        self.contract = contract
+        self.original_goal = contract.goal
+        self.reply_queue = reply_queue
+        self.resolved = False
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self.bind("<Control-Return>", lambda _event: self._confirm())
+
+        root = tk.Frame(self, bg=COLORS["bg"], padx=18, pady=16)
+        root.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(root, text="执行前确认最终验收合同", style="Hero.TLabel").pack(anchor=tk.W)
+        tk.Label(
+            root,
+            text="确认前不会启动任何子 Agent 或工作区工具。请重点检查产物路径、测试命令和安全要求。",
+            bg=COLORS["bg"],
+            fg=COLORS["muted"],
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor=tk.W, pady=(2, 10))
+
+        summary_card = tk.Frame(root, bg=COLORS["card"], highlightbackground=COLORS["line"], highlightthickness=1, padx=12, pady=10)
+        summary_card.pack(fill=tk.X)
+        tk.Label(summary_card, text="目标摘要", bg=COLORS["card"], fg=COLORS["mint_dark"], font=("Microsoft YaHei UI", 10, "bold")).pack(anchor=tk.W)
+        self.summary = tk.Label(summary_card, bg=COLORS["card"], fg=COLORS["text"], justify=tk.LEFT, wraplength=820, font=("Microsoft YaHei UI", 10))
+        self.summary.pack(anchor=tk.W, pady=(4, 0))
+
+        # Pack the action area before the expandable table so Windows DPI
+        # scaling can never push the confirmation button below the viewport.
+        buttons = tk.Frame(root, bg=COLORS["bg"])
+        buttons.pack(side=tk.BOTTOM, fill=tk.X, pady=(12, 0))
+        ttk.Button(buttons, text="取消任务", style="Soft.TButton", command=self._cancel).pack(side=tk.LEFT)
+        ttk.Button(buttons, text="编辑 JSON", style="Soft.TButton", command=self._edit).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(buttons, text="确认并开始执行", style="Accent.TButton", command=self._confirm).pack(side=tk.RIGHT)
+        tk.Label(
+            buttons,
+            text="快捷键：Ctrl+Enter 确认",
+            bg=COLORS["bg"],
+            fg=COLORS["muted"],
+            font=("Microsoft YaHei UI", 8),
+        ).pack(side=tk.RIGHT, padx=(0, 12))
+
+        self.constraints = tk.Label(root, bg=COLORS["bg"], fg=COLORS["muted"], justify=tk.LEFT, wraplength=840, font=("Microsoft YaHei UI", 9))
+        self.constraints.pack(side=tk.BOTTOM, anchor=tk.W, fill=tk.X, pady=(8, 0))
+
+        table_card = tk.Frame(root, bg=COLORS["card"], highlightbackground=COLORS["line"], highlightthickness=1, padx=10, pady=10)
+        table_card.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        columns = ("id", "required", "type", "description", "verification")
+        self.criteria_tree = ttk.Treeview(table_card, columns=columns, show="headings", height=12)
+        for key, title, width in [
+            ("id", "标准 ID", 125),
+            ("required", "必需", 55),
+            ("type", "检查类型", 90),
+            ("description", "完成要求", 300),
+            ("verification", "路径 / 命令 / 指标", 210),
+        ]:
+            self.criteria_tree.heading(key, text=title)
+            self.criteria_tree.column(key, width=width, anchor=tk.W)
+        scrollbar = ttk.Scrollbar(table_card, orient=tk.VERTICAL, command=self.criteria_tree.yview)
+        self.criteria_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.criteria_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._refresh()
+        self.grab_set()
+        self.focus_set()
+
+    def _refresh(self):
+        self.summary.configure(text=self.contract.goal_summary or self.contract.goal)
+        for item in self.criteria_tree.get_children():
+            self.criteria_tree.delete(item)
+        for criterion in self.contract.criteria:
+            verification = criterion.path or criterion.command or (
+                f"{criterion.metric_name} >= {criterion.threshold}"
+                if criterion.metric_name and criterion.threshold is not None
+                else "语义/人工证据"
+            )
+            self.criteria_tree.insert(
+                "",
+                tk.END,
+                values=(
+                    criterion.id,
+                    "是" if criterion.required else "否",
+                    criterion.check_type,
+                    criterion.description,
+                    verification,
+                ),
+            )
+        constraints = "；".join(self.contract.constraints) if self.contract.constraints else "无额外约束"
+        self.constraints.configure(text=f"约束：{constraints}")
+
+    def _edit(self):
+        ContractJsonEditor(self, self.contract, self._apply_edit)
+
+    def _apply_edit(self, contract):
+        self.contract = contract
+        self._refresh()
+
+    def _confirm(self):
+        try:
+            ContractValidator().validate(self.contract, expected_goal=self.original_goal)
+        except Exception as exc:
+            messagebox.showerror("合同校验失败", str(exc), parent=self)
+            return
+        self._resolve(self.contract)
+
+    def _cancel(self):
+        self._resolve(None)
+
+    def _resolve(self, value):
+        if self.resolved:
+            return
+        self.resolved = True
+        self.reply_queue.put(value)
+        self.grab_release()
+        self.destroy()
+
+
+class RunHistoryDialog(tk.Toplevel):
+    def __init__(self, parent, store, on_resume):
+        super().__init__(parent)
+        self.title("长程任务运行历史")
+        self.geometry("840x480")
+        self.minsize(680, 380)
+        self.transient(parent)
+        self.configure(bg=COLORS["bg"])
+        self.on_resume = on_resume
+        self.states = {state.run_id: state for state in store.list_runs()}
+
+        root = tk.Frame(self, bg=COLORS["bg"], padx=18, pady=16)
+        root.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(root, text="长程任务运行历史", style="Hero.TLabel").pack(anchor=tk.W)
+        tk.Label(
+            root,
+            text="暂停、运行中断或失败的任务可以从持久化阶段状态继续；已完成任务仅供查看。",
+            bg=COLORS["bg"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9),
+        ).pack(anchor=tk.W, pady=(2, 10))
+        columns = ("run_id", "status", "phase", "tasks", "updated", "goal")
+        self.tree = ttk.Treeview(root, columns=columns, show="headings", height=11)
+        for key, title, width in [
+            ("run_id", "运行 ID", 105), ("status", "状态", 85), ("phase", "阶段", 55),
+            ("tasks", "任务数", 55), ("updated", "更新时间", 145), ("goal", "目标", 300),
+        ]:
+            self.tree.heading(key, text=title)
+            self.tree.column(key, width=width, anchor=tk.W)
+        self.tree.pack(fill=tk.BOTH, expand=True)
+        for state in self.states.values():
+            self.tree.insert("", tk.END, iid=state.run_id, values=(
+                state.run_id, state.status, state.phase, state.total_tasks,
+                state.updated_at.replace("T", " ")[:19], state.goal,
+            ))
+        self.tree.bind("<Double-1>", lambda _event: self._resume())
+        buttons = tk.Frame(root, bg=COLORS["bg"])
+        buttons.pack(fill=tk.X, pady=(10, 0))
+        ttk.Button(buttons, text="关闭", style="Soft.TButton", command=self.destroy).pack(side=tk.LEFT)
+        self.resume_btn = ttk.Button(buttons, text="恢复所选任务", style="Accent.TButton", command=self._resume)
+        self.resume_btn.pack(side=tk.RIGHT)
+        if not self.states:
+            self.resume_btn.configure(state=tk.DISABLED)
+
+    def _resume(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("请选择运行", "请先选择一条历史运行记录。", parent=self)
+            return
+        state = self.states[selected[0]]
+        if state.status == "completed":
+            messagebox.showinfo("任务已完成", "该任务已经完成，不需要恢复。", parent=self)
+            return
+        self.destroy()
+        self.on_resume(state)
+
+
 class FreshUI(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -151,6 +413,7 @@ class FreshUI(tk.Tk):
         self.configure(bg=COLORS["bg"])
         self.events = queue.Queue()
         self.running = False
+        self.active_controller = None
         self.task_items: Dict[str, str] = {}
         self._style()
         self._layout()
@@ -248,6 +511,9 @@ class FreshUI(tk.Tk):
         ).pack(side=tk.LEFT, padx=(10, 0))
         self.run_btn = ttk.Button(actions, text="开始协作  →", style="Accent.TButton", command=self.start_run)
         self.run_btn.pack(side=tk.RIGHT)
+        self.pause_btn = ttk.Button(actions, text="暂停", style="Soft.TButton", command=self.pause_run, state=tk.DISABLED)
+        self.pause_btn.pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(actions, text="运行历史", style="Soft.TButton", command=self.show_run_history).pack(side=tk.RIGHT, padx=(0, 8))
 
     def _toggle_developer_modes(self):
         values = DEFAULT_EXECUTION_MODES + DEVELOPER_EXECUTION_MODES if self.developer_mode.get() else DEFAULT_EXECUTION_MODES
@@ -375,9 +641,46 @@ class FreshUI(tk.Tk):
         self._set_state("运行中", COLORS["blue_dark"])
         self.append_log(f"MainAgent ← {goal}")
         execution_mode = self.execution_mode.get()
-        threading.Thread(target=self._run_worker, args=(goal, config, execution_mode), daemon=True).start()
+        threading.Thread(target=self._run_worker, args=(goal, config, execution_mode, None), daemon=True).start()
 
-    def _run_worker(self, goal, config, execution_mode):
+    def pause_run(self):
+        if not self.running or self.active_controller is None:
+            return
+        self.active_controller.request_pause()
+        self.pause_btn.configure(state=tk.DISABLED)
+        self._set_state("已请求暂停，等待当前阶段安全结束", COLORS["blue_dark"])
+        self.append_log("LONG → 已请求在当前阶段边界安全暂停")
+
+    def show_run_history(self):
+        RunHistoryDialog(self, LongHorizonStore(long_horizon_runs_root()), self.resume_run)
+
+    def resume_run(self, state):
+        if self.running:
+            messagebox.showwarning("任务正在运行", "请先等待当前任务结束或暂停。")
+            return
+        try:
+            config = self._config()
+        except Exception as exc:
+            messagebox.showwarning("模型配置错误", str(exc))
+            return
+        if not state.acceptance_contract:
+            messagebox.showerror("无法恢复", "该历史任务没有持久化验收合同。")
+            return
+        self.goal.delete("1.0", tk.END)
+        self.goal.insert("1.0", state.goal)
+        self.execution_mode.set("长程任务")
+        self.running = True
+        self.run_btn.configure(state=tk.DISABLED)
+        self.clear_log()
+        self.append_log(f"RESUME → run_id={state.run_id} · phase={state.phase} · status={state.status}")
+        self._set_state("正在恢复长程任务", COLORS["blue_dark"])
+        threading.Thread(
+            target=self._run_worker,
+            args=(state.goal, config, "长程任务", state.run_id),
+            daemon=True,
+        ).start()
+
+    def _run_worker(self, goal, config, execution_mode, resume_run_id=None):
         try:
             pipeline = PlanningPipeline()
             tool_test = execution_mode in DEVELOPER_EXECUTION_MODES
@@ -418,10 +721,9 @@ class FreshUI(tk.Tk):
             evaluator = AcceptanceEvaluator(workspace=workspace, execute_commands=tool_test) if client else None
             orchestrator = Orchestrator(registry, max_workers=4, on_event=on_event, acceptance=evaluator)
             if execution_mode == "长程任务":
-                runs_root = Path(
-                    os.getenv("LONG_HORIZON_RUNS_DIR", str(PROJECT_DIR / "runs" / "long_horizon"))
-                )
+                runs_root = long_horizon_runs_root()
                 store = LongHorizonStore(runs_root)
+                persisted_state = store.load(resume_run_id) if resume_run_id else None
 
                 def on_long_event(event, payload):
                     self.events.put(("long_horizon_event", (event, payload)))
@@ -435,16 +737,55 @@ class FreshUI(tk.Tk):
                     def on_global_evaluator_event(event, payload):
                         self.events.put(("global_evaluator_event", (event, payload)))
 
-                    initial_plan = pipeline.build(goal)
+                    baseline_plan = pipeline.build(goal)
+
+                    def on_contract_event(event, payload):
+                        self.events.put(("contract_event", (event, payload)))
+
+                    domain = pipeline.intent_parser.parse(goal).domain
+                    if persisted_state:
+                        contract = AcceptanceContract.from_dict(persisted_state.acceptance_contract)
+                    else:
+                        contract = StructuredGoalContractGenerator(
+                            client,
+                            on_event=on_contract_event,
+                        ).generate(goal, plan_hint=baseline_plan, domain=domain)
+                else:
+                    replanner = lambda state, evaluation: build_recovery_plan(pipeline, state, evaluation)
+                    baseline_plan = pipeline.build(goal)
+                    contract = (
+                        AcceptanceContract.from_dict(persisted_state.acceptance_contract)
+                        if persisted_state
+                        else AcceptanceContract.from_plan(goal, baseline_plan)
+                    )
+
+                if not persisted_state:
+                    # Execution gate: no controller, Agent, or tool starts before confirmation.
+                    contract_reply = queue.Queue(maxsize=1)
+                    self.events.put(("contract_preview_request", (contract, contract_reply)))
+                    contract = contract_reply.get()
+                    if contract is None:
+                        self.events.put(("run_cancelled", "用户取消了验收合同，未启动 Agent 或工具"))
+                        return
+                ContractValidator().validate(contract, expected_goal=goal)
+                self.events.put((
+                    "contract_confirmed",
+                    {
+                        "criterion_count": len(contract.criteria),
+                        "required_count": sum(item.required for item in contract.criteria),
+                    },
+                ))
+                initial_plan = ContractAwarePlanner().build(contract, baseline_plan, task_budget=50)
+                self.events.put(("contract_plan", initial_plan))
+
+                if client:
                     global_evaluator = StructuredGlobalEvaluator(
                         client=client,
-                        contract=AcceptanceContract.from_plan(goal, initial_plan),
+                        contract=contract,
                         workspace=workspace,
                         on_event=on_global_evaluator_event,
                     )
                 else:
-                    replanner = lambda state, evaluation: build_recovery_plan(pipeline, state, evaluation)
-                    initial_plan = pipeline.build(goal)
                     global_evaluator = ReportStatusEvaluator()
 
                 controller = LongHorizonController(
@@ -456,8 +797,11 @@ class FreshUI(tk.Tk):
                     max_phases=3,
                     max_total_tasks=50,
                     on_event=on_long_event,
+                    acceptance_contract=contract.to_dict(),
                 )
-                report = controller.run(goal)
+                self.active_controller = controller
+                self.events.put(("controller_ready", None))
+                report = controller.run(goal, run_id=resume_run_id, resume=bool(resume_run_id))
                 self.events.put(("long_horizon_report", (report, store.state_path(report.state.run_id))))
             else:
                 main = MainAgent(orchestrator, pipeline.build)
@@ -499,12 +843,41 @@ class FreshUI(tk.Tk):
                     self._show_replanner_event(payload)
                 elif kind == "global_evaluator_event":
                     self._show_global_evaluator_event(payload)
+                elif kind == "contract_event":
+                    self._show_contract_event(payload)
+                elif kind == "contract_preview_request":
+                    contract, reply_queue = payload
+                    self._set_state("等待验收合同确认", COLORS["blue_dark"])
+                    self.append_log("CONTRACT → 等待用户预览并确认；尚未启动 Agent 或工具")
+                    ContractPreviewDialog(self, contract, reply_queue)
+                elif kind == "contract_confirmed":
+                    self.append_log(
+                        "CONTRACT → 用户已确认合同 · "
+                        f"criteria={payload['criterion_count']} · required={payload['required_count']}"
+                    )
+                    self._set_state("验收合同已确认，开始执行", COLORS["blue_dark"])
+                elif kind == "contract_plan":
+                    self.append_log(
+                        f"CONTRACT PLANNER → 初始 DAG 已覆盖合同 · tasks={len(payload.subtasks)} · "
+                        f"required={len(payload.final_acceptance)}"
+                    )
+                elif kind == "controller_ready":
+                    self.pause_btn.configure(state=tk.NORMAL)
+                elif kind == "run_cancelled":
+                    self.append_log(f"CONTRACT → {payload}")
+                    self.running = False
+                    self.active_controller = None
+                    self.run_btn.configure(state=tk.NORMAL)
+                    self.pause_btn.configure(state=tk.DISABLED)
+                    self._set_state("任务已取消", COLORS["muted"])
                 elif kind == "fixture_ready":
                     self.append_log(f"FIXTURE → {payload}")
                 elif kind == "run_error":
                     self.append_log("ERROR → " + payload)
                     self.running = False
+                    self.active_controller = None
                     self.run_btn.configure(state=tk.NORMAL)
+                    self.pause_btn.configure(state=tk.DISABLED)
                     self._set_state("任务失败", COLORS["danger"])
         except queue.Empty:
             pass
@@ -522,7 +895,9 @@ class FreshUI(tk.Tk):
             self.append_log(f"{task_id} [{result.status}] → {summary}")
         self.append_log(f"MainAgent → status={report.status}, rounds={report.rounds}")
         self.running = False
+        self.active_controller = None
         self.run_btn.configure(state=tk.NORMAL)
+        self.pause_btn.configure(state=tk.DISABLED)
         color = COLORS["success"] if report.status == "success" else COLORS["danger"]
         self._set_state(f"完成 · {report.status} · {report.rounds} 轮", color)
 
@@ -595,6 +970,10 @@ class FreshUI(tk.Tk):
             self.append_log(f"LONG → 运行失败 · {detail.get('reason', '')}")
         elif event == "run_completed":
             self.append_log(f"LONG → 最终目标已通过阶段 {detail.get('phase', '?')} 验收")
+        elif event == "run_paused":
+            self.append_log(
+                f"LONG → 已在阶段 {detail.get('phase', '?')} 安全暂停 · {detail.get('boundary', '')}"
+            )
 
     def _show_long_horizon_report(self, payload):
         report, state_path = payload
@@ -605,8 +984,14 @@ class FreshUI(tk.Tk):
         )
         self.append_log(f"STATE → {state_path}")
         self.running = False
+        self.active_controller = None
         self.run_btn.configure(state=tk.NORMAL)
-        color = COLORS["success"] if state.status == "completed" else COLORS["danger"]
+        self.pause_btn.configure(state=tk.DISABLED)
+        color = (
+            COLORS["success"] if state.status == "completed"
+            else COLORS["blue_dark"] if state.status == "paused"
+            else COLORS["danger"]
+        )
         self._set_state(f"长程任务 · {state.status} · {state.phase} 阶段", color)
 
     def _show_replanner_event(self, payload):
@@ -649,6 +1034,23 @@ class FreshUI(tk.Tk):
             verdict = "最终目标完成" if detail.get("completed") else "仍有目标缺口"
             self.append_log(
                 f"GLOBAL SEMANTIC → {verdict} · missing={detail.get('missing_criteria', [])}"
+            )
+
+    def _show_contract_event(self, payload):
+        event, detail = payload
+        if event == "contract_generation_started":
+            self.append_log(
+                f"CONTRACT → 正在生成最终验收合同 · attempt={detail.get('attempt', '?')}"
+            )
+        elif event == "contract_validation_failed":
+            self.append_log(
+                f"CONTRACT → 合同校验失败 · attempt={detail.get('attempt', '?')} · "
+                f"{self._compact(detail.get('error', ''), 300)}"
+            )
+        elif event == "contract_generation_completed":
+            self.append_log(
+                f"CONTRACT → 验收合同已冻结 · criteria={detail.get('criterion_count', 0)} · "
+                f"required={detail.get('required_count', 0)}"
             )
 
     @staticmethod

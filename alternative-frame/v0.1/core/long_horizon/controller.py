@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Event
 from typing import Callable, List, Optional
 from uuid import uuid4
 
@@ -40,6 +41,7 @@ class LongHorizonController:
         max_phases: int = 3,
         max_total_tasks: int = 50,
         on_event: Callable[[str, dict], None] | None = None,
+        acceptance_contract: Optional[dict] = None,
     ):
         if max_phases < 1 or max_total_tasks < 1:
             raise ValueError("long-horizon budgets must be positive")
@@ -51,6 +53,16 @@ class LongHorizonController:
         self.max_phases = max_phases
         self.max_total_tasks = max_total_tasks
         self.on_event = on_event
+        self.acceptance_contract = acceptance_contract
+        self._pause_requested = Event()
+
+    def request_pause(self) -> None:
+        """Request a safe pause at the next phase boundary."""
+        self._pause_requested.set()
+
+    @property
+    def pause_requested(self) -> bool:
+        return self._pause_requested.is_set()
 
     def run(self, goal: str, run_id: str | None = None, resume: bool = False) -> LongHorizonReport:
         if not goal or not goal.strip():
@@ -58,6 +70,8 @@ class LongHorizonController:
         run_id = run_id or uuid4().hex[:12]
         state = self._load_or_create(goal.strip(), run_id, resume)
         phase_reports: List[RunReport] = []
+        if resume:
+            self._pause_requested.clear()
 
         if resume and state.status == "completed":
             return LongHorizonReport(state, phase_reports)
@@ -68,6 +82,10 @@ class LongHorizonController:
 
         try:
             while state.phase < state.max_phases:
+                if self._pause_requested.is_set():
+                    state.status = "paused"
+                    self._persist(state, "run_paused", {"phase": state.phase, "boundary": "before_phase"})
+                    break
                 plan = self._next_plan(state)
                 if plan is None:
                     state.status = "failed"
@@ -116,6 +134,10 @@ class LongHorizonController:
                     break
 
                 state.decisions.append(f"phase {phase_number}: continue - {evaluation.reason}")
+                if self._pause_requested.is_set():
+                    state.status = "paused"
+                    self._persist(state, "run_paused", {"phase": state.phase, "boundary": "after_phase"})
+                    break
                 if state.phase >= state.max_phases:
                     state.status = "budget_exhausted"
                     state.last_error = "max_phases_exceeded"
@@ -134,6 +156,10 @@ class LongHorizonController:
             state = self.store.load(run_id)
             if state.goal != goal:
                 raise ValueError("resume goal does not match persisted run goal")
+            if self.acceptance_contract and state.acceptance_contract and state.acceptance_contract != self.acceptance_contract:
+                raise ValueError("resume acceptance contract does not match persisted contract")
+            if not state.acceptance_contract and self.acceptance_contract:
+                state.acceptance_contract = self.acceptance_contract
             return state
         if self.store.state_path(run_id).exists():
             raise FileExistsError(f"run already exists: {run_id}; use resume=True")
@@ -142,6 +168,7 @@ class LongHorizonController:
             goal=goal,
             max_phases=self.max_phases,
             max_total_tasks=self.max_total_tasks,
+            acceptance_contract=self.acceptance_contract,
         )
 
     def _next_plan(self, state: LongHorizonState) -> Plan | None:

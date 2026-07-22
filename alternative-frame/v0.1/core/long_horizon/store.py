@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from .state import LongHorizonState
 
@@ -40,6 +40,20 @@ class LongHorizonStore:
         if not path.is_file():
             raise FileNotFoundError(f"long-horizon run not found: {run_id}")
         return LongHorizonState.from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+    def list_runs(self) -> List[LongHorizonState]:
+        """Return readable runs newest first; ignore partial/corrupt directories."""
+        if not self.root.is_dir():
+            return []
+        runs = []
+        for path in self.root.iterdir():
+            if not path.is_dir():
+                continue
+            try:
+                runs.append(self.load(path.name))
+            except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+                continue
+        return sorted(runs, key=lambda state: state.updated_at, reverse=True)
 
     def append_event(self, run_id: str, event: str, payload: Dict[str, Any] | None = None) -> None:
         from ..models import utc_now

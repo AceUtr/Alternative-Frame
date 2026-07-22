@@ -74,8 +74,8 @@ class TaskDecomposer:
     def _research(self, intent: Intent) -> List[TaskDraft]:
         return [
             TaskDraft("research", "researcher", "分析研究目标、已有方案和实验假设", expected_outputs=["research_plan.md"], required_tools=["file_editor"]),
-            TaskDraft("baseline", "experimenter", "确认基线、运行环境和可复现实验", expected_outputs=["baseline.json"], required_tools=["shell", "experiment_runner"]),
-            TaskDraft("experiment", "experimenter", "执行实验、记录指标并保存产物", depends_on=["research", "baseline"], expected_outputs=["results.tsv"], required_tools=["shell", "experiment_runner"]),
+            TaskDraft("baseline", "experimenter", "确认基线、运行环境和可复现实验", expected_outputs=["baseline.json"], required_tools=["shell_runner", "experiment_runner"]),
+            TaskDraft("experiment", "experimenter", "执行实验、记录指标并保存产物", depends_on=["research", "baseline"], expected_outputs=["results.tsv"], required_tools=["shell_runner", "experiment_runner"]),
             TaskDraft("review", "reviewer", "检查实验结果、证据和结论", depends_on=["experiment"], expected_outputs=["review.md"], required_tools=["file_editor"]),
         ]
 
@@ -83,11 +83,11 @@ class TaskDecomposer:
         return [
             TaskDraft("requirements", "analyst", "拆解需求并生成验收条件", expected_outputs=["requirements.md"], required_tools=["file_editor"]),
             TaskDraft("architecture", "architect", "设计模块、接口和数据模型", depends_on=["requirements"], expected_outputs=["architecture.md"], required_tools=["file_editor"]),
-            TaskDraft("tests", "tester", "编写需求测试和回归测试", depends_on=["requirements"], expected_outputs=["tests/"], required_tools=["file_editor", "shell"]),
-            TaskDraft("implementation_auth", "developer", "实现用户注册、登录和认证相关功能，并完成局部检查", depends_on=["architecture", "tests"], expected_outputs=["src/"], required_tools=["file_editor", "shell", "git"]),
-            TaskDraft("implementation_service", "developer", "实现核心业务接口、数据模型和错误处理，并完成局部检查", depends_on=["architecture", "tests"], expected_outputs=["src/"], required_tools=["file_editor", "shell", "git"]),
-            TaskDraft("integration", "tester", "合并检查实现并运行完整自动化测试", depends_on=["implementation_auth", "implementation_service"], expected_outputs=["test-report.json"], required_tools=["shell", "test_runner"]),
-            TaskDraft("review", "reviewer", "执行最终测试、构建和代码审查", depends_on=["integration"], expected_outputs=["test-report.json"], required_tools=["shell", "test_runner"]),
+            TaskDraft("tests", "tester", "编写需求测试和回归测试", depends_on=["requirements"], expected_outputs=["tests/"], required_tools=["file_editor", "shell_runner"]),
+            TaskDraft("implementation_auth", "developer", "实现用户注册、登录和认证相关功能，并完成局部检查", depends_on=["architecture", "tests"], expected_outputs=["src/"], required_tools=["file_editor", "shell_runner", "git_client"]),
+            TaskDraft("implementation_service", "developer", "实现核心业务接口、数据模型和错误处理，并完成局部检查", depends_on=["architecture", "tests"], expected_outputs=["src/"], required_tools=["file_editor", "shell_runner", "git_client"]),
+            TaskDraft("integration", "tester", "合并检查实现并运行完整自动化测试", depends_on=["implementation_auth", "implementation_service"], expected_outputs=["test-report.json"], required_tools=["shell_runner", "test_runner"]),
+            TaskDraft("review", "reviewer", "执行最终测试、构建和代码审查", depends_on=["integration"], expected_outputs=["test-report.json"], required_tools=["test_runner"]),
         ]
 
 
