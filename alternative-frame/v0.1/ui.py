@@ -21,10 +21,12 @@ from core.long_horizon import (
     LongHorizonStore,
     ReportStatusEvaluator,
     StructuredGlobalEvaluator,
+    DeterministicGlobalEvaluator,
     StructuredGoalContractGenerator,
     StructuredInitialDAGGenerator,
     StructuredReplanner,
     ResilientReplanner,
+    DeterministicRecoveryPlanner,
 )
 from core.tool_calling_agent import ToolCallingAgent
 from core.main_agent import MainAgent
@@ -399,9 +401,6 @@ class RunHistoryDialog(tk.Toplevel):
             messagebox.showinfo("请选择运行", "请先选择一条历史运行记录。", parent=self)
             return
         state = self.states[selected[0]]
-        if state.status == "completed":
-            messagebox.showinfo("任务已完成", "该任务已经完成，不需要恢复。", parent=self)
-            return
         self.destroy()
         self.on_resume(state)
 
@@ -744,9 +743,19 @@ class FreshUI(tk.Tk):
                 runs_root = long_horizon_runs_root()
                 store = LongHorizonStore(runs_root)
                 persisted_state = store.load(resume_run_id) if resume_run_id else None
+                persisted_contract = None
+                if persisted_state:
+                    if not persisted_state.acceptance_contract:
+                        raise ValueError("历史运行缺少验收合同，无法安全恢复")
+                    persisted_contract = AcceptanceContract.from_dict(
+                        persisted_state.acceptance_contract
+                    )
 
                 def on_long_event(event, payload):
                     self.events.put(("long_horizon_event", (event, payload)))
+
+                def on_global_evaluator_event(event, payload):
+                    self.events.put(("global_evaluator_event", (event, payload)))
 
                 if client:
                     def on_replanner_event(event, payload):
@@ -761,28 +770,25 @@ class FreshUI(tk.Tk):
                         on_event=on_replanner_event,
                     )
 
-                    def on_global_evaluator_event(event, payload):
-                        self.events.put(("global_evaluator_event", (event, payload)))
-
                     baseline_plan = pipeline.build(goal)
 
                     def on_contract_event(event, payload):
                         self.events.put(("contract_event", (event, payload)))
 
                     domain = pipeline.intent_parser.parse(goal).domain
-                    if persisted_state:
-                        contract = AcceptanceContract.from_dict(persisted_state.acceptance_contract)
+                    if persisted_contract:
+                        contract = persisted_contract
                     else:
                         contract = StructuredGoalContractGenerator(
                             client,
                             on_event=on_contract_event,
                         ).generate(goal, plan_hint=baseline_plan, domain=domain)
                 else:
-                    replanner = lambda state, evaluation: build_recovery_plan(pipeline, state, evaluation)
+                    replanner = DeterministicRecoveryPlanner()
                     baseline_plan = pipeline.build(goal)
                     contract = (
-                        AcceptanceContract.from_dict(persisted_state.acceptance_contract)
-                        if persisted_state
+                        persisted_contract
+                        if persisted_contract
                         else AcceptanceContract.from_plan(goal, baseline_plan)
                     )
 
@@ -828,7 +834,11 @@ class FreshUI(tk.Tk):
                         on_event=on_global_evaluator_event,
                     )
                 else:
-                    global_evaluator = ReportStatusEvaluator()
+                    global_evaluator = DeterministicGlobalEvaluator(
+                        contract=contract,
+                        workspace=workspace,
+                        on_event=on_global_evaluator_event,
+                    )
 
                 controller = LongHorizonController(
                     orchestrator=orchestrator,
@@ -935,7 +945,7 @@ class FreshUI(tk.Tk):
             if item:
                 vals = list(self.tree.item(item, "values"))
                 vals[3] = result.status
-                vals[4] = result.attempts
+                vals[4] = str(result.attempts)
                 self.tree.item(item, values=vals)
             summary = result.summary.replace("\n", " ")[:180]
             self.append_log(f"{task_id} [{result.status}] → {summary}")
@@ -954,12 +964,12 @@ class FreshUI(tk.Tk):
         if event == "task_started":
             if item:
                 vals[3] = "执行中"
-                vals[4] = runtime_attempt or "?"
+                vals[4] = str(runtime_attempt) if runtime_attempt is not None else "?"
             self.append_log(f"{task_id} → 子 Agent 开始执行" + (f" · attempt={runtime_attempt}" if runtime_attempt else ""))
         elif event == "task_finished" and result is not None:
             if item:
                 vals[3] = result.status
-                vals[4] = result.attempts
+                vals[4] = str(result.attempts)
             self.append_log(f"{task_id} → {result.status}")
         elif event == "task_retry_scheduled" and result is not None:
             reason = "; ".join(result.failures[:3]) or result.status
@@ -969,7 +979,7 @@ class FreshUI(tk.Tk):
             )
             if item:
                 vals[3] = "准备重试"
-                vals[4] = result.attempts
+                vals[4] = str(result.attempts)
         if item and vals:
             self.tree.item(item, values=vals)
 
@@ -1027,6 +1037,11 @@ class FreshUI(tk.Tk):
             self.append_log(f"LONG → 运行失败 · {detail.get('reason', '')}")
         elif event == "run_completed":
             self.append_log(f"LONG → 最终目标已通过阶段 {detail.get('phase', '?')} 验收")
+        elif event == "completed_run_audit_failed":
+            missing = ", ".join(detail.get("missing_criteria", [])) or "unknown"
+            self.append_log(f"AUDIT → 历史完成状态已撤销 · 缺失: {missing}")
+        elif event == "completed_run_audit_passed":
+            self.append_log("AUDIT → 历史完成状态已通过合同重新验收")
         elif event == "run_paused":
             self.append_log(
                 f"LONG → 已在阶段 {detail.get('phase', '?')} 安全暂停 · {detail.get('boundary', '')}"

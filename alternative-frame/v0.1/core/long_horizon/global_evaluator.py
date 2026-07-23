@@ -190,3 +190,64 @@ class StructuredGlobalEvaluator:
             self.on_event(event, payload)
         except Exception:
             pass
+
+
+class DeterministicGlobalEvaluator:
+    """Contract-level evaluator for runs that have no semantic model client.
+
+    It deliberately fails closed when required criteria need semantic review.
+    A green phase report alone is never sufficient to complete a contracted run.
+    """
+
+    def __init__(self, contract: AcceptanceContract, workspace, on_event=None):
+        self.contract = contract
+        self.hard_gate = HardEvidenceGate(workspace)
+        self.on_event = on_event
+
+    def evaluate(self, state: LongHorizonState, plan: Plan, report: RunReport) -> GoalEvaluation:
+        bundle = EvidenceBundle.collect(state, report)
+        hard = self.hard_gate.evaluate(self.contract, bundle)
+        passed = [item.criterion_id for item in hard.results if item.status == "passed"]
+        failed = [item.criterion_id for item in hard.results if item.status == "failed"]
+        deferred = [
+            item.criterion_id
+            for item in hard.results
+            if item.status == "deferred"
+            and next((criterion.required for criterion in self.contract.criteria if criterion.id == item.criterion_id), True)
+        ]
+        evidence = [
+            f"{item.criterion_id}: {proof}"
+            for item in hard.results
+            for proof in item.evidence
+        ]
+        missing = list(dict.fromkeys(failed + deferred))
+        completed = hard.passed and not deferred
+        failures = list(hard.failures)
+        if deferred:
+            failures.append(f"required criteria need semantic evaluation: {deferred}")
+        self._emit("global_hard_gate", {
+            "passed": completed,
+            "passed_count": len(passed),
+            "missing_count": len(missing),
+            "failures": failures,
+        })
+        return GoalEvaluation(
+            completed=completed,
+            reason=(
+                "all deterministic contract acceptance gates passed"
+                if completed
+                else "deterministic contract acceptance gates did not pass"
+            ),
+            satisfied_criteria=passed,
+            missing_criteria=missing,
+            failures=failures,
+            next_focus=[f"satisfy contract criterion: {item}" for item in missing],
+            evidence=evidence,
+        )
+
+    def _emit(self, event, payload):
+        if self.on_event:
+            try:
+                self.on_event(event, payload)
+            except Exception:
+                pass

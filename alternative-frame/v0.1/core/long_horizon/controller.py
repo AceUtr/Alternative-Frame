@@ -5,7 +5,7 @@ from threading import Event
 from typing import Callable, List, Optional
 from uuid import uuid4
 
-from ..models import Plan
+from ..models import Plan, utc_now
 from ..orchestrator import Orchestrator, RunReport
 from .evaluator import GoalEvaluation, ReportStatusEvaluator
 from .state import LongHorizonState, PhaseRecord, plan_from_dict, plan_to_dict
@@ -74,7 +74,15 @@ class LongHorizonController:
             self._pause_requested.clear()
 
         if resume and state.status == "completed":
-            return LongHorizonReport(state, phase_reports)
+            audit = self._audit_completed_state(state)
+            if audit.completed:
+                self._persist(state, "completed_run_audit_passed", audit.to_dict())
+                return LongHorizonReport(state, phase_reports)
+            state.status = "paused"
+            state.last_evaluation = audit.to_dict()
+            state.last_error = "completed_run_failed_contract_reaudit"
+            state.decisions.append(f"completion revoked: {audit.reason}")
+            self._persist(state, "completed_run_audit_failed", audit.to_dict())
 
         state.status = "running"
         state.last_error = None
@@ -158,6 +166,19 @@ class LongHorizonController:
             raise
 
         return LongHorizonReport(state, phase_reports)
+
+    def _audit_completed_state(self, state: LongHorizonState) -> GoalEvaluation:
+        """Re-check persisted completion against the current contract evaluator.
+
+        This repairs historical runs that were marked complete by the legacy
+        phase-status evaluator without contract evidence.
+        """
+        if not state.acceptance_contract or isinstance(self.evaluator, ReportStatusEvaluator):
+            return GoalEvaluation(True, "no contract-aware completion audit is available")
+        empty_plan = Plan(state.goal, [], final_acceptance=[])
+        now = utc_now()
+        audit_report = RunReport(state.goal, "success", {}, 0, now, now)
+        return self.evaluator.evaluate(state, empty_plan, audit_report)
 
     def _load_or_create(self, goal: str, run_id: str, resume: bool) -> LongHorizonState:
         if resume:

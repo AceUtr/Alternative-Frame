@@ -106,6 +106,7 @@ class HardEvidenceGate:
         provenance = [
             artifact
             for artifact in bundle.artifacts
+            if not str(artifact).startswith("artifact://")
             if self._artifact_matches(expected, self._normalize_path(artifact))
         ]
         if not provenance:

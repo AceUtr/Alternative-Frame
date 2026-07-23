@@ -14,6 +14,7 @@ from core.long_horizon import (
     LongHorizonState,
     LongHorizonStore,
     StructuredGlobalEvaluator,
+    DeterministicGlobalEvaluator,
 )
 from core.models import AgentResult, Plan, SubTask
 from core.orchestrator import Orchestrator
@@ -201,3 +202,82 @@ def test_semantic_evaluator_fails_closed_on_invalid_model_output(tmp_path):
     assert evaluation.completed is False
     assert evaluation.missing_criteria == ["semantic_goal_coverage"]
     assert client.calls == 2
+
+
+def test_deterministic_global_evaluator_rejects_green_tasks_with_missing_contract_files(tmp_path):
+    contract = AcceptanceContract(
+        "deliver files and tests",
+        [
+            GoalCriterion("source", "source exists", "file_exists", path="retry_demo/word_counter.py"),
+            GoalCriterion("tests", "tests exist", "file_exists", path="retry_demo/test_word_counter.py"),
+            GoalCriterion("command", "tests pass", "command", command="python -m unittest -v"),
+        ],
+    )
+    (tmp_path / "retry_demo").mkdir()
+    (tmp_path / "retry_demo" / "word_counter.py").write_text("pass\n", encoding="utf-8")
+    state = LongHorizonState("run", contract.goal, 3, 20, artifacts=["retry_demo/word_counter.py"])
+    registry = AgentRegistry()
+    registry.register(GoalDemoAgent(tmp_path))
+    report = Orchestrator(registry).run(Plan("claim success", [SubTask("readme_missing", "worker", "claim")]))
+
+    result = DeterministicGlobalEvaluator(contract, tmp_path).evaluate(state, Plan("phase", []), report)
+
+    assert result.completed is False
+    assert result.missing_criteria == ["tests", "command"]
+
+
+def test_artifact_uri_cannot_prove_a_real_contract_file(tmp_path):
+    (tmp_path / "review").write_text("exists", encoding="utf-8")
+    contract = AcceptanceContract(
+        "real output",
+        [GoalCriterion("review", "review exists", "file_exists", path="review")],
+    )
+    bundle = EvidenceBundle("success", {}, ["artifact://review"], [], [])
+
+    result = HardEvidenceGate(tmp_path).evaluate(contract, bundle)
+
+    assert result.passed is False
+    assert "no artifact provenance" in result.failures[0]
+
+
+def test_resume_revokes_historical_false_completion_and_runs_recovery(tmp_path):
+    contract = AcceptanceContract(
+        "create required output",
+        [GoalCriterion("required", "required file exists", "file_exists", path="required.txt")],
+    )
+    state = LongHorizonState(
+        "false-positive", contract.goal, 3, 10,
+        status="completed", phase=1, total_tasks=1,
+        acceptance_contract=contract.to_dict(),
+        last_evaluation=GoalEvaluation(True, "legacy phase status").to_dict(),
+    )
+    store = LongHorizonStore(tmp_path / "runs")
+    store.save(state)
+
+    class RecoveryAgent(Agent):
+        role = "worker"
+
+        def run(self, task, context):
+            (tmp_path / "required.txt").write_text("done", encoding="utf-8")
+            return AgentResult(task.id, "success", artifacts=["required.txt"])
+
+    registry = AgentRegistry()
+    registry.register(RecoveryAgent())
+    controller = LongHorizonController(
+        Orchestrator(registry),
+        lambda _state: Plan("unused", []),
+        store,
+        evaluator=DeterministicGlobalEvaluator(contract, tmp_path),
+        replanner=lambda _state, _evaluation: Plan(
+            "repair", [SubTask("repair", "worker", "create required output")]
+        ),
+        acceptance_contract=contract.to_dict(),
+    )
+
+    report = controller.run(contract.goal, run_id="false-positive", resume=True)
+
+    assert report.status == "completed"
+    assert report.state.phase == 2
+    assert report.state.last_evaluation["satisfied_criteria"] == ["required"]
+    events = (tmp_path / "runs" / "false-positive" / "events.jsonl").read_text(encoding="utf-8")
+    assert "completed_run_audit_failed" in events
