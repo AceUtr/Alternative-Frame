@@ -43,3 +43,34 @@ def test_transient_connection_errors_are_retried(monkeypatch):
 
     assert message["content"] == "OK"
     assert outcomes == []
+
+
+def test_normalize_content_supports_reasoning_and_segmented_backends():
+    assert OpenAICompatibleClient._normalize_content(
+        {"content": "", "reasoning_content": '{"goal_summary":"ok"}'}
+    ) == '{"goal_summary":"ok"}'
+    assert OpenAICompatibleClient._normalize_content(
+        {"content": [{"type": "text", "text": "part one"}, {"text": {"value": "part two"}}]}
+    ) == "part one\npart two"
+    assert OpenAICompatibleClient._normalize_content(
+        {"content": None, "output_text": '{"goal_summary":"fallback field"}'}
+    ) == '{"goal_summary":"fallback field"}'
+
+
+def test_chat_can_limit_transport_attempts(monkeypatch):
+    calls = []
+
+    def always_timeout(_request, timeout):
+        calls.append(timeout)
+        raise TimeoutError("read operation timed out")
+
+    monkeypatch.setattr("core.model_client.urllib.request.urlopen", always_timeout)
+    client = OpenAICompatibleClient(ModelConfig("https://example.test/v1", "secret", "model"))
+
+    try:
+        client.chat([{"role": "user", "content": "test"}], max_attempts=1)
+    except RuntimeError as exc:
+        assert "timed out" in str(exc)
+    else:
+        raise AssertionError("timeout must be surfaced")
+    assert calls == [120]

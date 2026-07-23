@@ -10,6 +10,7 @@ from core.long_horizon import (
     PlanValidationError,
     PlanValidator,
     StructuredReplanner,
+    StructuredReplanError,
     LongHorizonController,
     LongHorizonStore,
 )
@@ -187,3 +188,26 @@ def test_controller_executes_model_generated_multi_agent_recovery_plan(tmp_path)
     assert report.state.failed_tasks == ["phase-1:initial"]
     assert {item.task_ids[0] for item in report.state.phases} >= {"initial", "diagnose"}
     assert len(client.messages) == 1
+
+
+def test_replanner_retries_transport_timeout_before_failing():
+    class TimeoutClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, _messages, tools=None):
+            self.calls += 1
+            raise TimeoutError("read operation timed out")
+
+    client = TimeoutClient()
+    state = LongHorizonState("run", "goal", max_phases=3, max_total_tasks=10, phase=1)
+    evaluation = GoalEvaluation(False, "missing", missing_criteria=["docs"])
+    replanner = StructuredReplanner(client, max_attempts=2, retry_delays=())
+
+    try:
+        replanner(state, evaluation)
+    except StructuredReplanError as exc:
+        assert "timed out" in str(exc)
+    else:
+        raise AssertionError("transport timeout must not be treated as a plan")
+    assert client.calls == 2

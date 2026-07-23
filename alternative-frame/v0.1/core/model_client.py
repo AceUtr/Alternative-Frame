@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -47,7 +48,12 @@ class OpenAICompatibleClient:
     def __init__(self, config: ModelConfig):
         self.config = config
 
-    def chat(self, messages: List[Dict[str, str]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    def chat(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        max_attempts: Optional[int] = None,
+    ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
@@ -68,8 +74,11 @@ class OpenAICompatibleClient:
 
         errors = []
         data = None
+        transient_attempts = self.MAX_TRANSIENT_ATTEMPTS if max_attempts is None else max_attempts
+        if transient_attempts < 1:
+            raise ValueError("max_attempts must be positive")
         for request_url in endpoints:
-            for attempt in range(1, self.MAX_TRANSIENT_ATTEMPTS + 1):
+            for attempt in range(1, transient_attempts + 1):
                 request = urllib.request.Request(
                     request_url,
                     data=json.dumps(payload).encode("utf-8"),
@@ -96,13 +105,13 @@ class OpenAICompatibleClient:
                     raw = exc.read().decode("utf-8", errors="replace")[:120]
                     errors.append(f"{request_url} attempt {attempt}: HTTP {exc.code}, body {raw!r}")
                     retry = exc.code == 429 or 500 <= exc.code < 600
-                except (urllib.error.URLError, TimeoutError) as exc:
+                except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
                     errors.append(f"{request_url} attempt {attempt}: {exc}")
                     retry = True
 
                 if data is not None:
                     break
-                if not retry or attempt >= self.MAX_TRANSIENT_ATTEMPTS:
+                if not retry or attempt >= transient_attempts:
                     break
                 time.sleep(self.RETRY_DELAYS_SECONDS[attempt - 1])
             if data is not None:
@@ -111,7 +120,38 @@ class OpenAICompatibleClient:
         if data is None:
             raise RuntimeError("CCswitch/API connection failed. Tried: " + " | ".join(errors))
         try:
-            message = data["choices"][0]["message"]
+            choice = data["choices"][0]
+            message = choice["message"]
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError(f"unexpected model response: {data}") from exc
+        if not isinstance(message, dict):
+            raise RuntimeError(f"unexpected model message: {message!r}")
+        message = dict(message)
+        message["content"] = self._normalize_content(message)
+        message["_finish_reason"] = choice.get("finish_reason")
         return message
+
+    @staticmethod
+    def _normalize_content(message: Dict[str, Any]) -> str:
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                elif isinstance(text, dict) and isinstance(text.get("value"), str):
+                    parts.append(text["value"])
+            if parts:
+                return "\n".join(parts)
+        # Several OpenAI-compatible reasoning backends expose the final JSON
+        # here while leaving content null/empty.
+        for field in ("reasoning_content", "reasoning", "analysis", "text", "output_text"):
+            value = message.get(field)
+            if isinstance(value, str) and value.strip():
+                return value
+        return ""

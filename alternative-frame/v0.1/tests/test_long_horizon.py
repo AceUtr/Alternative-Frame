@@ -24,6 +24,28 @@ class CompleteOnSecondPhase:
         return GoalEvaluation(True, "implementation and verification phases passed", evidence=["verified=true"])
 
 
+class MemoryStore:
+    def __init__(self):
+        self.states = {}
+        self.events = []
+
+    def save(self, state):
+        self.states[state.run_id] = state
+
+    def append_event(self, run_id, event, payload=None):
+        self.events.append((run_id, event, payload or {}))
+
+    def state_path(self, run_id):
+        class MissingPath:
+            @staticmethod
+            def exists():
+                return False
+        return MissingPath()
+
+    def load(self, run_id):
+        return self.states[run_id]
+
+
 def test_controller_replans_and_persists_two_phases(tmp_path):
     events = []
 
@@ -76,6 +98,28 @@ def test_controller_stops_before_task_budget_is_exceeded(tmp_path):
     assert report.status == "budget_exhausted"
     assert report.state.phase == 0
     assert report.state.last_error == "max_total_tasks_exceeded"
+
+
+def test_replanner_failure_is_persisted_as_resumable_pending_state():
+    store = MemoryStore()
+
+    def unavailable(_state, _evaluation):
+        raise TimeoutError("replanner unavailable")
+
+    controller = LongHorizonController(
+        make_orchestrator(),
+        lambda _state: Plan("phase", [SubTask("work", "worker", "work")]),
+        store,
+        evaluator=CompleteOnSecondPhase(),
+        replanner=unavailable,
+    )
+
+    report = controller.run("goal", run_id="pending")
+
+    assert report.status == "paused"
+    assert report.state.phase == 1
+    assert report.state.last_error.startswith("replan_pending:")
+    assert any(event == "replan_pending" for _, event, _ in store.events)
 
 
 def test_controller_resumes_a_persisted_pending_phase(tmp_path):

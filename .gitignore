@@ -25,6 +25,15 @@ dist/
 __pycache__/
 *.py[cod]
 
+# Local Agent execution artifacts (not framework source)
+alternative-frame/v0.1/requirements.md
+alternative-frame/v0.1/architecture.md
+alternative-frame/v0.1/retry_demo/
+alternative-frame/v0.1/src/
+alternative-frame/v0.1/tests/test_auth_service.py
+alternative-frame/v0.1/tests/test_requirements_acceptance.py
+alternative-frame/v0.1/tests/test_word_counter.py
+
 # Long-horizon runtime state (keep the directory, not individual runs)
 alternative-frame/v0.1/runs/long_horizon/*
 !alternative-frame/v0.1/runs/long_horizon/.gitkeep

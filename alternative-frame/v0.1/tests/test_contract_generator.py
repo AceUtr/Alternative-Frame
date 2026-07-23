@@ -104,6 +104,62 @@ def test_generator_requests_one_correction_for_an_unsafe_path():
     assert "unsafe or missing relative path" in client.messages[1][-1]["content"]
 
 
+def test_generator_uses_compact_retry_after_empty_response():
+    client = SequenceClient(["", valid_contract_payload()])
+    generator = StructuredGoalContractGenerator(client, max_attempts=2)
+
+    contract = generator.generate("Implement auth safely")
+
+    assert contract.criteria[0].id == "source_exists"
+    assert len(client.messages[1]) == 2
+    assert "compact strict JSON" in client.messages[1][0]["content"]
+
+
+def test_generator_builds_safe_rule_contract_after_two_empty_responses():
+    events = []
+    client = SequenceClient(["", ""])
+    goal = (
+        "Create retry_demo/app.py and retry_demo/test_app.py.\n"
+        "python -m unittest discover -s retry_demo -p \"test_*.py\" -v"
+    )
+    generator = StructuredGoalContractGenerator(
+        client,
+        max_attempts=2,
+        on_event=lambda event, payload: events.append(event),
+    )
+
+    contract = generator.generate(goal)
+
+    assert [item.path for item in contract.criteria if item.check_type == "file_exists"] == [
+        "retry_demo/app.py",
+        "retry_demo/test_app.py",
+    ]
+    assert [item.command for item in contract.criteria if item.check_type == "command"] == [
+        'python -m unittest discover -s retry_demo -p "test_*.py" -v'
+    ]
+    assert contract.criteria[-1].check_type == "semantic"
+    assert events[-1] == "contract_fallback_completed"
+
+
+def test_generator_falls_back_after_repeated_unsafe_command_fields():
+    invalid = valid_contract_payload()
+    for criterion in invalid["criteria"]:
+        criterion["check_type"] = "command"
+        criterion["command"] = "check value; print(value)"
+    events = []
+    client = SequenceClient([invalid, invalid])
+    generator = StructuredGoalContractGenerator(
+        client,
+        max_attempts=2,
+        on_event=lambda event, payload: events.append(event),
+    )
+
+    contract = generator.generate("Create retry_demo/app.py")
+
+    assert contract.goal == "Create retry_demo/app.py"
+    assert events[-1] == "contract_fallback_completed"
+
+
 def test_generator_fails_before_execution_after_two_invalid_contracts():
     invalid = valid_contract_payload()
     invalid["criteria"][1]["command"] = "powershell Remove-Item -Recurse ."

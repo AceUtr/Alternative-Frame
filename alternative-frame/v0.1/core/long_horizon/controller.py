@@ -86,7 +86,15 @@ class LongHorizonController:
                     state.status = "paused"
                     self._persist(state, "run_paused", {"phase": state.phase, "boundary": "before_phase"})
                     break
-                plan = self._next_plan(state)
+                try:
+                    plan = self._next_plan(state)
+                except Exception as exc:
+                    if state.phase > 0:
+                        state.status = "paused"
+                        state.last_error = f"replan_pending: {type(exc).__name__}: {exc}"
+                        self._persist(state, "replan_pending", {"phase": state.phase, "reason": state.last_error})
+                        break
+                    raise
                 if plan is None:
                     state.status = "failed"
                     state.last_error = "replanner_did_not_produce_a_plan"

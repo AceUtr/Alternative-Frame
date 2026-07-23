@@ -15,14 +15,16 @@ from core.agents import AgentRegistry, DeterministicAgent
 from core.acceptance import AcceptanceEvaluator
 from core.long_horizon import (
     AcceptanceContract,
-    ContractAwarePlanner,
+    RuleBasedContractPlanner,
     ContractValidator,
     LongHorizonController,
     LongHorizonStore,
     ReportStatusEvaluator,
     StructuredGlobalEvaluator,
     StructuredGoalContractGenerator,
+    StructuredInitialDAGGenerator,
     StructuredReplanner,
+    ResilientReplanner,
 )
 from core.tool_calling_agent import ToolCallingAgent
 from core.main_agent import MainAgent
@@ -557,8 +559,16 @@ class FreshUI(tk.Tk):
         ttk.Entry(row, textvariable=self.temperature, width=7).pack(side=tk.LEFT)
         tk.Label(row, text="Max Tokens", bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT, padx=(14, 6))
         ttk.Entry(row, textvariable=self.max_tokens, width=8).pack(side=tk.LEFT)
+        runtime_row = tk.Frame(inner, bg=COLORS["card"])
+        runtime_row.grid(row=7, column=0, columnspan=2, sticky=tk.EW, pady=5)
+        self.api_timeout = tk.StringVar(value="120")
+        self.replan_attempts = tk.StringVar(value="2")
+        tk.Label(runtime_row, text="API Timeout", width=12, anchor=tk.W, bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT)
+        ttk.Entry(runtime_row, textvariable=self.api_timeout, width=7).pack(side=tk.LEFT)
+        tk.Label(runtime_row, text="Replan Attempts", bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT, padx=(14, 6))
+        ttk.Entry(runtime_row, textvariable=self.replan_attempts, width=8).pack(side=tk.LEFT)
         self.test_btn = ttk.Button(inner, text="测试连接", style="Soft.TButton", command=self.test_connection)
-        self.test_btn.grid(row=7, column=1, sticky=tk.E, pady=(9, 0))
+        self.test_btn.grid(row=8, column=1, sticky=tk.E, pady=(9, 0))
         inner.columnconfigure(1, weight=1)
 
     def _field(self, parent, row, label, widget):
@@ -591,12 +601,19 @@ class FreshUI(tk.Tk):
             return None
         if not self.api_key.get().strip() or not self.model_name.get().strip():
             raise ValueError("API 模式需要填写 API Key 和模型名称")
+        timeout_seconds = int(self.api_timeout.get())
+        replan_attempts = int(self.replan_attempts.get())
+        if timeout_seconds < 10 or timeout_seconds > 600:
+            raise ValueError("API Timeout 必须在 10 到 600 秒之间")
+        if replan_attempts < 1 or replan_attempts > 5:
+            raise ValueError("Replan Attempts 必须在 1 到 5 之间")
         return ModelConfig(
             base_url=self.base_url.get().strip().rstrip("/"),
             api_key=self.api_key.get().strip(),
             model=self.model_name.get().strip(),
             temperature=float(self.temperature.get()),
             max_tokens=int(self.max_tokens.get()),
+            timeout_seconds=timeout_seconds,
         )
 
     def test_connection(self):
@@ -735,7 +752,14 @@ class FreshUI(tk.Tk):
                     def on_replanner_event(event, payload):
                         self.events.put(("replanner_event", (event, payload)))
 
-                    replanner = StructuredReplanner(client, on_event=on_replanner_event)
+                    replanner = ResilientReplanner(
+                        StructuredReplanner(
+                            client,
+                            max_attempts=max(1, int(self.replan_attempts.get())),
+                            on_event=on_replanner_event,
+                        ),
+                        on_event=on_replanner_event,
+                    )
 
                     def on_global_evaluator_event(event, payload):
                         self.events.put(("global_evaluator_event", (event, payload)))
@@ -778,8 +802,23 @@ class FreshUI(tk.Tk):
                         "required_count": sum(item.required for item in contract.criteria),
                     },
                 ))
-                initial_plan = ContractAwarePlanner().build(contract, baseline_plan, task_budget=50)
-                self.events.put(("contract_plan", initial_plan))
+
+                def on_initial_plan_event(event, payload):
+                    self.events.put(("initial_plan_event", (event, payload)))
+
+                skip_initial_generation = bool(
+                    persisted_state and (persisted_state.phase > 0 or persisted_state.pending_plan)
+                )
+                initial_plan = None if skip_initial_generation else (
+                    StructuredInitialDAGGenerator(
+                        client,
+                        on_event=on_initial_plan_event,
+                    ).generate(contract, task_budget=50)
+                    if client
+                    else RuleBasedContractPlanner().build(contract, task_budget=50)
+                )
+                if initial_plan:
+                    self.events.put(("contract_plan", initial_plan))
 
                 if client:
                     global_evaluator = StructuredGlobalEvaluator(
@@ -793,7 +832,9 @@ class FreshUI(tk.Tk):
 
                 controller = LongHorizonController(
                     orchestrator=orchestrator,
-                    initial_planner=lambda _state: initial_plan,
+                    initial_planner=lambda _state: initial_plan or RuleBasedContractPlanner().build(
+                        contract, task_budget=50
+                    ),
                     store=store,
                     evaluator=global_evaluator,
                     replanner=replanner,
@@ -844,6 +885,8 @@ class FreshUI(tk.Tk):
                     self._show_long_horizon_report(payload)
                 elif kind == "replanner_event":
                     self._show_replanner_event(payload)
+                elif kind == "initial_plan_event":
+                    self._show_initial_plan_event(payload)
                 elif kind == "global_evaluator_event":
                     self._show_global_evaluator_event(payload)
                 elif kind == "contract_event":
@@ -988,6 +1031,10 @@ class FreshUI(tk.Tk):
             self.append_log(
                 f"LONG → 已在阶段 {detail.get('phase', '?')} 安全暂停 · {detail.get('boundary', '')}"
             )
+        elif event == "replan_pending":
+            self.append_log(
+                f"LONG → 恢复规划暂不可用，运行已保存为可恢复状态 · {detail.get('reason', '')}"
+            )
 
     def _show_long_horizon_report(self, payload):
         report, state_path = payload
@@ -1024,6 +1071,32 @@ class FreshUI(tk.Tk):
             self.append_log(
                 f"REPLAN → 结构化计划通过校验 · tasks={detail.get('task_count', 0)} · "
                 f"{detail.get('phase_goal', '')}"
+            )
+        elif event == "replan_retry_wait":
+            self.append_log(
+                f"REPLAN → 请求失败，将在 {detail.get('delay_seconds', 0)} 秒后重试"
+            )
+        elif event == "replan_fallback_started":
+            self.append_log(
+                f"REPLAN → 模型恢复规划不可用，启用规则型恢复 · {self._compact(detail.get('error', ''), 220)}"
+            )
+        elif event == "replan_fallback_completed":
+            self.append_log(f"REPLAN → 规则型恢复 DAG 已生成 · tasks={detail.get('task_count', 0)}")
+
+    def _show_initial_plan_event(self, payload):
+        event, detail = payload
+        if event == "initial_plan_started":
+            self.append_log(f"INITIAL DAG → 正在根据合同生成任务图 · attempt={detail.get('attempt', '?')}")
+        elif event == "initial_plan_validation_failed":
+            self.append_log(
+                f"INITIAL DAG → 计划校验失败 · attempt={detail.get('attempt', '?')} · "
+                f"{self._compact(detail.get('error', ''), 260)}"
+            )
+        elif event == "initial_plan_completed":
+            self.append_log(f"INITIAL DAG → 合同原生任务图已通过校验 · tasks={detail.get('task_count', 0)}")
+        elif event == "initial_plan_fallback":
+            self.append_log(
+                f"INITIAL DAG → 模型计划不可用，已启用规则型合同任务图 · tasks={detail.get('task_count', 0)}"
             )
 
     def _show_global_evaluator_event(self, payload):
@@ -1065,6 +1138,11 @@ class FreshUI(tk.Tk):
             self.append_log(
                 f"CONTRACT → 验收合同已冻结 · criteria={detail.get('criterion_count', 0)} · "
                 f"required={detail.get('required_count', 0)}"
+            )
+        elif event == "contract_fallback_completed":
+            self.append_log(
+                f"CONTRACT → 模型合同不可用，已启用规则型安全合同 · "
+                f"criteria={detail.get('criterion_count', 0)} · required={detail.get('required_count', 0)}"
             )
 
     @staticmethod

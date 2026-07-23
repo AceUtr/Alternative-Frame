@@ -84,3 +84,5 @@ API 与本地 Stub 的长程模式都会在执行前弹出合同预览窗口。�
 真实模型两阶段验收可运行 `python run_real_two_phase_demo.py`。该脚本受控遗漏 `FINAL_EVIDENCE.md`，要求 GlobalEvaluator 在第一阶段拒绝完成并触发 StructuredReplanner，最终必须在后续阶段补齐证据才返回成功。API Key 只从环境变量读取且不会落盘。
 
 任务级执行现采用反馈驱动重试：Agent 会收到完整产物路径、工具权限和验收检查；验收失败后，下一次尝试会获得缺失文件、精确测试命令或证据缺口等结构化修复指令。文件验收同时要求本次任务运行的工具产物来源，旧文件不能直接通过。详见 [`docs/milestone-7-feedback-driven-retry.md`](docs/milestone-7-feedback-driven-retry.md)。
+
+长程初始 DAG 现由确认合同直接生成，不再执行固定的软件认证模板。每个标准和文件必须有唯一责任任务，计划不得发明合同外路径；模型计划失败时自动切换规则型合同 DAG。Replanner 支持超时重试、退避和缺失标准驱动的确定性恢复，双重失败时保存为可恢复状态。详见 [`docs/milestone-8-contract-native-dag-resilience.md`](docs/milestone-8-contract-native-dag-resilience.md)。

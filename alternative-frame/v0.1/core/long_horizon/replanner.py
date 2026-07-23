@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Dict, Mapping, Optional, Set
 
@@ -105,6 +106,7 @@ class StructuredReplanner:
         validator: Optional[PlanValidator] = None,
         max_attempts: int = 2,
         on_event: Optional[Callable[[str, dict], None]] = None,
+        retry_delays: tuple = (1.0, 3.0),
     ):
         if max_attempts < 1:
             raise ValueError("max_attempts must be positive")
@@ -112,6 +114,7 @@ class StructuredReplanner:
         self.validator = validator or PlanValidator()
         self.max_attempts = max_attempts
         self.on_event = on_event
+        self.retry_delays = retry_delays
 
     def _emit(self, event: str, payload: dict) -> None:
         if not self.on_event:
@@ -191,9 +194,14 @@ class StructuredReplanner:
         last_error = "model did not return a plan"
         for attempt in range(1, self.max_attempts + 1):
             self._emit("replan_started", {"attempt": attempt, "phase": state.phase + 1})
-            response = self.client.chat(messages)
-            content = response.get("content", "") if isinstance(response, dict) else str(response)
+            content = ""
             try:
+                response = (
+                    self.client.chat(messages, max_attempts=1)
+                    if isinstance(self.client, OpenAICompatibleClient)
+                    else self.client.chat(messages)
+                )
+                content = response.get("content", "") if isinstance(response, dict) else str(response)
                 payload = self._parse_json(content)
                 plan = self._build_plan(payload)
                 self.validator.validate(plan, remaining_tasks)
@@ -202,22 +210,27 @@ class StructuredReplanner:
                     {"attempt": attempt, "phase_goal": plan.goal, "task_count": len(plan.subtasks)},
                 )
                 return plan
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError, PlanValidationError) as exc:
-                last_error = str(exc)
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
                 self._emit("replan_validation_failed", {"attempt": attempt, "error": last_error})
                 if attempt < self.max_attempts:
-                    messages.extend(
-                        [
-                            {"role": "assistant", "content": content},
-                            {
-                                "role": "user",
-                                "content": (
-                                    f"The plan was rejected: {last_error}. "
-                                    "Return a corrected strict JSON object only."
-                                ),
-                            },
-                        ]
-                    )
+                    if content:
+                        messages.extend(
+                            [
+                                {"role": "assistant", "content": content},
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        f"The plan was rejected: {last_error}. "
+                                        "Return a corrected strict JSON object only."
+                                    ),
+                                },
+                            ]
+                        )
+                    delay = self.retry_delays[min(attempt - 1, len(self.retry_delays) - 1)] if self.retry_delays else 0
+                    self._emit("replan_retry_wait", {"attempt": attempt, "delay_seconds": delay})
+                    if delay:
+                        time.sleep(delay)
         raise StructuredReplanError(
             f"model failed to produce a valid recovery plan after {self.max_attempts} attempts: {last_error}"
         )
