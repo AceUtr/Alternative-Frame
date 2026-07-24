@@ -32,6 +32,8 @@ class PhaseRecord:
     artifacts: List[str] = field(default_factory=list)
     started_at: str = ""
     finished_at: str = ""
+    local_recovery_cycles: int = 0
+    executed_task_count: int = 0
 
 
 @dataclass

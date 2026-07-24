@@ -48,6 +48,7 @@ class StructuredGlobalEvaluator:
                 "passed_count": len(passed_ids),
                 "missing_count": len(missing_ids),
                 "failures": hard.failures,
+                "results": [item.to_dict() for item in hard.results],
             },
         )
         if not hard.passed:
@@ -230,6 +231,7 @@ class DeterministicGlobalEvaluator:
             "passed_count": len(passed),
             "missing_count": len(missing),
             "failures": failures,
+            "results": [item.to_dict() for item in hard.results],
         })
         return GoalEvaluation(
             completed=completed,

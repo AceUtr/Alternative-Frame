@@ -60,6 +60,7 @@ class ToolCallingAgent(Agent):
             "task_contract": task_contract,
             "dependencies": {key: value.summary for key, value in context.items()},
             "retry_feedback": task.metadata.get("retry_feedback"),
+            "local_recovery_feedback": task.metadata.get("local_recovery_feedback"),
             "completion_rules": [
                 "Create every declared expected output at its exact relative path.",
                 "Execute every command check exactly as written and retain exit-code evidence.",

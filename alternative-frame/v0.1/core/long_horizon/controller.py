@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from ..models import Plan, utc_now
 from ..orchestrator import Orchestrator, RunReport
+from ..local_recovery import LocalDAGRecoveryController
 from .evaluator import GoalEvaluation, ReportStatusEvaluator
 from .state import LongHorizonState, PhaseRecord, plan_from_dict, plan_to_dict
 from .store import LongHorizonStore
@@ -42,6 +43,7 @@ class LongHorizonController:
         max_total_tasks: int = 50,
         on_event: Callable[[str, dict], None] | None = None,
         acceptance_contract: Optional[dict] = None,
+        local_recovery: LocalDAGRecoveryController | None = None,
     ):
         if max_phases < 1 or max_total_tasks < 1:
             raise ValueError("long-horizon budgets must be positive")
@@ -54,6 +56,7 @@ class LongHorizonController:
         self.max_total_tasks = max_total_tasks
         self.on_event = on_event
         self.acceptance_contract = acceptance_contract
+        self.local_recovery = local_recovery
         self._pause_requested = Event()
 
     def request_pause(self) -> None:
@@ -134,7 +137,14 @@ class LongHorizonController:
                     },
                 )
 
-                report = self.orchestrator.run(plan)
+                if self.local_recovery:
+                    remaining_budget = state.max_total_tasks - state.total_tasks
+                    self.local_recovery.on_event = (
+                        lambda event, payload: self._persist(state, event, payload)
+                    )
+                    report = self.local_recovery.run(plan, remaining_budget).report
+                else:
+                    report = self.orchestrator.run(plan)
                 phase_reports.append(report)
                 evaluation = self.evaluator.evaluate(state, plan, report)
                 self._record_phase(state, phase_number, plan, report, evaluation)
@@ -221,7 +231,7 @@ class LongHorizonController:
         evidence_records = [record for result in report.results.values() for record in result.tool_records]
         completed = [f"phase-{phase_number}:{task_id}" for task_id, result in report.results.items() if result.status == "success"]
         failed = [f"phase-{phase_number}:{task_id}" for task_id, result in report.results.items() if result.status != "success"]
-        state.total_tasks += len(plan.subtasks)
+        state.total_tasks += report.executed_task_count or len(plan.subtasks)
         state.completed_tasks.extend(completed)
         state.failed_tasks.extend(failed)
         for artifact in artifacts:
@@ -240,6 +250,8 @@ class LongHorizonController:
                 artifacts=artifacts,
                 started_at=report.started_at,
                 finished_at=report.finished_at,
+                local_recovery_cycles=report.local_recovery_cycles,
+                executed_task_count=report.executed_task_count or len(plan.subtasks),
             )
         )
 

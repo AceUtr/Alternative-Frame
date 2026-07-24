@@ -13,6 +13,7 @@ from typing import Dict
 
 from core.agents import AgentRegistry, DeterministicAgent
 from core.acceptance import AcceptanceEvaluator
+from core.local_recovery import LocalDAGRecoveryController
 from core.long_horizon import (
     AcceptanceContract,
     RuleBasedContractPlanner,
@@ -416,6 +417,8 @@ class FreshUI(tk.Tk):
         self.running = False
         self.active_controller = None
         self.task_items: Dict[str, str] = {}
+        self.dag_nodes = {}
+        self.current_dag_tasks = []
         self._style()
         self._layout()
         self.after(100, self._drain)
@@ -578,12 +581,46 @@ class FreshUI(tk.Tk):
         inner = tk.Frame(card, bg=COLORS["card"], padx=14, pady=12)
         inner.pack(fill=tk.BOTH, expand=True)
         ttk.Label(inner, text="03  子任务与角色", style="CardTitle.TLabel").pack(anchor=tk.W, pady=(0, 8))
+        self.dag_tabs = ttk.Notebook(inner)
+        self.dag_tabs.pack(fill=tk.BOTH, expand=True)
+        table_tab = tk.Frame(self.dag_tabs, bg=COLORS["card"])
+        graph_tab = tk.Frame(self.dag_tabs, bg=COLORS["card"])
+        evidence_tab = tk.Frame(self.dag_tabs, bg=COLORS["card"])
+        self.dag_tabs.add(table_tab, text="任务表")
+        self.dag_tabs.add(graph_tab, text="DAG")
+        self.dag_tabs.add(evidence_tab, text="验收证据")
+
         cols = ("task", "role", "depends", "status", "attempts")
-        self.tree = ttk.Treeview(inner, columns=cols, show="headings", height=11)
+        self.tree = ttk.Treeview(table_tab, columns=cols, show="headings", height=11)
         for key, title, width in [("task", "子任务", 130), ("role", "角色", 120), ("depends", "依赖", 140), ("status", "状态", 90), ("attempts", "尝试", 60)]:
             self.tree.heading(key, text=title)
             self.tree.column(key, width=width, anchor=tk.W)
         self.tree.pack(fill=tk.BOTH, expand=True)
+
+        self.dag_canvas = tk.Canvas(
+            graph_tab, background="#F8FBFA", highlightbackground=COLORS["line"],
+            highlightthickness=1, bd=0, height=310,
+        )
+        dag_x = ttk.Scrollbar(graph_tab, orient=tk.HORIZONTAL, command=self.dag_canvas.xview)
+        dag_y = ttk.Scrollbar(graph_tab, orient=tk.VERTICAL, command=self.dag_canvas.yview)
+        self.dag_canvas.configure(xscrollcommand=dag_x.set, yscrollcommand=dag_y.set)
+        self.dag_canvas.grid(row=0, column=0, sticky=tk.NSEW)
+        dag_y.grid(row=0, column=1, sticky=tk.NS)
+        dag_x.grid(row=1, column=0, sticky=tk.EW)
+        graph_tab.rowconfigure(0, weight=1)
+        graph_tab.columnconfigure(0, weight=1)
+
+        evidence_cols = ("criterion", "status", "reason")
+        self.evidence_tree = ttk.Treeview(evidence_tab, columns=evidence_cols, show="headings", height=11)
+        for key, title, width in [
+            ("criterion", "验收条件", 180), ("status", "状态", 75), ("reason", "证据 / 原因", 300)
+        ]:
+            self.evidence_tree.heading(key, text=title)
+            self.evidence_tree.column(key, width=width, anchor=tk.W)
+        self.evidence_tree.tag_configure("passed", foreground=COLORS["success"])
+        self.evidence_tree.tag_configure("failed", foreground=COLORS["danger"])
+        self.evidence_tree.tag_configure("deferred", foreground=COLORS["blue_dark"])
+        self.evidence_tree.pack(fill=tk.BOTH, expand=True)
 
     def _log_card(self, card):
         inner = tk.Frame(card, bg=COLORS["card"], padx=14, pady=12)
@@ -594,6 +631,99 @@ class FreshUI(tk.Tk):
         ttk.Button(head, text="清空", style="Soft.TButton", command=self.clear_log).pack(side=tk.RIGHT)
         self.log = tk.Text(inner, height=11, wrap=tk.WORD, bd=0, padx=10, pady=8, state=tk.DISABLED, background="#F8FBFA", foreground=COLORS["text"], font=("Cascadia Mono", 9), highlightbackground=COLORS["line"], highlightthickness=1)
         self.log.pack(fill=tk.BOTH, expand=True)
+
+    def _render_dag(self, tasks, recovery=False):
+        self.current_dag_tasks = list(tasks)
+        self.dag_nodes.clear()
+        self.dag_canvas.delete("all")
+        if not tasks:
+            return
+        task_map = {task.get("id", "unknown"): task for task in tasks}
+        levels = {}
+        unresolved = set(task_map)
+        while unresolved:
+            progressed = False
+            for task_id in list(unresolved):
+                dependencies = [dep for dep in task_map[task_id].get("depends_on", []) if dep in task_map]
+                if all(dep in levels for dep in dependencies):
+                    levels[task_id] = 0 if not dependencies else max(levels[dep] for dep in dependencies) + 1
+                    unresolved.remove(task_id)
+                    progressed = True
+            if not progressed:
+                for task_id in unresolved:
+                    levels[task_id] = 0
+                break
+        rows = {}
+        positions = {}
+        node_w, node_h, gap_x, gap_y = 158, 54, 54, 28
+        for task in tasks:
+            task_id = task.get("id", "unknown")
+            level = levels[task_id]
+            row = rows.get(level, 0)
+            rows[level] = row + 1
+            positions[task_id] = (24 + level * (node_w + gap_x), 24 + row * (node_h + gap_y))
+        for task in tasks:
+            task_id = task.get("id", "unknown")
+            x, y = positions[task_id]
+            for dependency in task.get("depends_on", []):
+                if dependency not in positions:
+                    continue
+                dx, dy = positions[dependency]
+                self.dag_canvas.create_line(
+                    dx + node_w, dy + node_h / 2, x, y + node_h / 2,
+                    fill="#9AB8AE", width=2, arrow=tk.LAST,
+                )
+        fill = COLORS["blue"] if recovery else "#FFFFFF"
+        outline = COLORS["blue_dark"] if recovery else COLORS["line"]
+        for task in tasks:
+            task_id = task.get("id", "unknown")
+            x, y = positions[task_id]
+            box = self.dag_canvas.create_rectangle(
+                x, y, x + node_w, y + node_h, fill=fill, outline=outline, width=2,
+            )
+            label = task_id if len(task_id) <= 22 else task_id[:20] + ".."
+            text = self.dag_canvas.create_text(
+                x + 9, y + 9, anchor=tk.NW, text=label,
+                fill=COLORS["text"], font=("Microsoft YaHei UI", 9, "bold"), width=node_w - 18,
+            )
+            role = self.dag_canvas.create_text(
+                x + 9, y + 34, anchor=tk.NW, text=task.get("role", "unknown"),
+                fill=COLORS["muted"], font=("Microsoft YaHei UI", 8), width=node_w - 18,
+            )
+            self.dag_nodes[task_id] = (box, text, role)
+        width = max(x for x, _ in positions.values()) + node_w + 24
+        height = max(y for _, y in positions.values()) + node_h + 24
+        self.dag_canvas.configure(scrollregion=(0, 0, width, height))
+
+    def _set_dag_status(self, task_id, status):
+        node = self.dag_nodes.get(task_id)
+        if not node:
+            return
+        normalized = str(status).lower()
+        if normalized in {"success", "completed", "通过"}:
+            fill, outline = "#DDF4EC", COLORS["success"]
+        elif normalized in {"failed", "timeout", "失败"}:
+            fill, outline = "#FBE7E7", COLORS["danger"]
+        elif normalized in {"running", "执行中"}:
+            fill, outline = COLORS["blue"], COLORS["blue_dark"]
+        elif normalized in {"recovering", "准备重试", "局部恢复"}:
+            fill, outline = "#FFF2CC", "#B58518"
+        else:
+            fill, outline = "#FFFFFF", COLORS["line"]
+        self.dag_canvas.itemconfigure(node[0], fill=fill, outline=outline)
+
+    def _render_evidence(self, results):
+        for item in self.evidence_tree.get_children():
+            self.evidence_tree.delete(item)
+        for result in results:
+            status = result.get("status", "deferred")
+            proof = result.get("evidence", [])
+            reason = " | ".join(proof) if proof else result.get("reason", "")
+            self.evidence_tree.insert(
+                "", tk.END,
+                values=(result.get("criterion_id", "unknown"), status, self._compact(reason, 180)),
+                tags=(status,),
+            )
 
     def _config(self):
         if self.mode.get() == "本地 Stub":
@@ -653,6 +783,9 @@ class FreshUI(tk.Tk):
         self.clear_log()
         for item in self.tree.get_children():
             self.tree.delete(item)
+        self.dag_canvas.delete("all")
+        self.dag_nodes.clear()
+        self._render_evidence([])
         self.task_items.clear()
         self._set_state("运行中", COLORS["blue_dark"])
         self.append_log(f"MainAgent ← {goal}")
@@ -852,6 +985,10 @@ class FreshUI(tk.Tk):
                     max_total_tasks=50,
                     on_event=on_long_event,
                     acceptance_contract=contract.to_dict(),
+                    local_recovery=LocalDAGRecoveryController(
+                        orchestrator,
+                        max_cycles=1,
+                    ),
                 )
                 self.active_controller = controller
                 self.events.put(("controller_ready", None))
@@ -883,6 +1020,10 @@ class FreshUI(tk.Tk):
                     for task in plan.subtasks:
                         item = self.tree.insert("", tk.END, values=(task.id, task.role, ", ".join(task.depends_on) or "—", "等待", "—"))
                         self.task_items[task.id] = item
+                    self._render_dag([
+                        {"id": task.id, "role": task.role, "depends_on": list(task.depends_on)}
+                        for task in plan.subtasks
+                    ])
                 elif kind == "report":
                     self._show_report(payload)
                 elif kind == "task_event":
@@ -966,11 +1107,13 @@ class FreshUI(tk.Tk):
                 vals[3] = "执行中"
                 vals[4] = str(runtime_attempt) if runtime_attempt is not None else "?"
             self.append_log(f"{task_id} → 子 Agent 开始执行" + (f" · attempt={runtime_attempt}" if runtime_attempt else ""))
+            self._set_dag_status(task_id, "running")
         elif event == "task_finished" and result is not None:
             if item:
                 vals[3] = result.status
                 vals[4] = str(result.attempts)
             self.append_log(f"{task_id} → {result.status}")
+            self._set_dag_status(task_id, result.status)
         elif event == "task_retry_scheduled" and result is not None:
             reason = "; ".join(result.failures[:3]) or result.status
             self.append_log(
@@ -980,6 +1123,7 @@ class FreshUI(tk.Tk):
             if item:
                 vals[3] = "准备重试"
                 vals[4] = str(result.attempts)
+            self._set_dag_status(task_id, "recovering")
         if item and vals:
             self.tree.item(item, values=vals)
 
@@ -1022,6 +1166,7 @@ class FreshUI(tk.Tk):
                     ),
                 )
                 self.task_items[task.get("id", "unknown")] = item
+            self._render_dag(detail.get("tasks", []))
             self.append_log(
                 f"PHASE {phase} → 已规划 {len(detail.get('tasks', []))} 个任务 · "
                 f"{detail.get('plan_goal', '')}"
@@ -1031,6 +1176,33 @@ class FreshUI(tk.Tk):
             phase = detail.get("phase", "?")
             verdict = "全局目标完成" if detail.get("completed") else "需要继续规划"
             self.append_log(f"PHASE {phase} → {verdict} · {detail.get('reason', '')}")
+        elif event == "local_recovery_started":
+            for task_id in detail.get("impacted", []):
+                self._set_dag_status(task_id, "recovering")
+            self.append_log(
+                f"LOCAL RECOVERY {detail.get('cycle', '?')} -> impacted={detail.get('impacted', [])} | "
+                f"frozen={detail.get('frozen', [])}"
+            )
+        elif event == "local_recovery_planned":
+            self._render_dag(detail.get("tasks", []), recovery=True)
+            self.dag_tabs.select(1)
+            self.append_log(
+                f"LOCAL DAG -> cycle={detail.get('cycle', '?')} | tasks={len(detail.get('tasks', []))}"
+            )
+        elif event == "local_recovery_finished":
+            for task_id in detail.get("recovered", []):
+                self._set_dag_status(task_id, "success")
+            for task_id in detail.get("remaining_failed", []):
+                self._set_dag_status(task_id, "failed")
+            self.append_log(
+                f"LOCAL RECOVERY {detail.get('cycle', '?')} -> {detail.get('status', 'unknown')} | "
+                f"remaining={detail.get('remaining_failed', [])}"
+            )
+        elif event == "local_recovery_budget_exhausted":
+            self.append_log(
+                f"LOCAL RECOVERY -> task budget exhausted | needed={detail.get('needed', 0)} | "
+                f"remaining={detail.get('remaining', 0)}"
+            )
         elif event == "budget_exhausted":
             self.append_log(f"LONG → 预算耗尽 · {detail.get('reason', '')}")
         elif event == "run_failed":
@@ -1117,6 +1289,8 @@ class FreshUI(tk.Tk):
     def _show_global_evaluator_event(self, payload):
         event, detail = payload
         if event == "global_hard_gate":
+            self._render_evidence(detail.get("results", []))
+            self.dag_tabs.select(2)
             verdict = "通过" if detail.get("passed") else "未通过"
             self.append_log(
                 f"GLOBAL HARD GATE → {verdict} · passed={detail.get('passed_count', 0)} · "

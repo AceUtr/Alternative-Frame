@@ -24,6 +24,8 @@ class RunReport:
     failures: List[str] = field(default_factory=list)
     started_epoch: float = 0.0
     finished_epoch: float = 0.0
+    executed_task_count: int = 0
+    local_recovery_cycles: int = 0
 
 
 class Orchestrator:
