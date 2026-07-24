@@ -3,14 +3,55 @@ from core.agents import AgentRegistry, DeterministicAgent
 from core.orchestrator import Orchestrator
 from domains.software_demo import build
 
+import os
+
+
 def software_handler(task, context):
 
     print("\n[Agent executing]")
+    print("Role:", task.role)
     print("Task:", task.description)
 
-    return (
-        f"Finished task: {task.description}"
-    )
+
+    if task.role=="analyst":
+
+        path="examples/software_task/app.py"
+
+        if os.path.exists(path):
+
+            with open(path,"r",encoding="utf8") as f:
+                code=f.read()
+
+            print("\nCode analysis:")
+            print(code)
+
+            return "Found possible bug in add function"
+
+
+    elif task.role=="developer":
+
+        path="examples/software_task/app.py"
+
+        with open(path,"w",encoding="utf8") as f:
+
+            f.write(
+"""
+def add(a,b):
+    return a+b
+"""
+            )
+
+        return "Bug fixed"
+
+
+    elif task.role=="tester":
+
+        return "pytest executed"
+
+
+    else:
+
+        return f"Finished {task.description}"
 
 
 def main():
