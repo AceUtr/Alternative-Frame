@@ -13,26 +13,67 @@ def software_handler(task, context):
     print("Task:", task.description)
 
 
+    project="examples/software_task"
+
+    app_file=f"{project}/app.py"
+
+
+    # ====================
+    # Analyst
+    # ====================
+
     if task.role=="analyst":
 
-        path="examples/software_task/app.py"
 
-        if os.path.exists(path):
+        if os.path.exists(app_file):
 
-            with open(path,"r",encoding="utf8") as f:
+            with open(
+                app_file,
+                "r",
+                encoding="utf8"
+            ) as f:
+
                 code=f.read()
 
-            print("\nCode analysis:")
+
+            print("\nCurrent Code:")
             print(code)
 
-            return "Found possible bug in add function"
 
+            if "-" in code:
+
+                return "Found bug: add function uses subtraction"
+
+            else:
+
+                return "No obvious bug found"
+
+
+        else:
+
+            return "app.py not found"
+
+
+
+    # ====================
+    # Developer
+    # ====================
 
     elif task.role=="developer":
 
-        path="examples/software_task/app.py"
 
-        with open(path,"w",encoding="utf8") as f:
+        os.makedirs(
+            project,
+            exist_ok=True
+        )
+
+
+        with open(
+            app_file,
+            "w",
+            encoding="utf8"
+        ) as f:
+
 
             f.write(
 """
@@ -41,18 +82,58 @@ def add(a,b):
 """
             )
 
-        return "Bug fixed"
 
+        print(
+            "Developer fixed app.py"
+        )
+
+
+        return "Code modification completed"
+
+
+
+    # ====================
+    # Tester
+    # ====================
 
     elif task.role=="tester":
 
-        return "pytest executed"
 
+        import subprocess
+
+
+        result=subprocess.run(
+            [
+                "pytest",
+                project
+            ],
+            capture_output=True,
+            text=True
+        )
+
+
+        print(result.stdout)
+
+
+        if result.returncode==0:
+
+            return "All tests passed"
+
+        else:
+
+            return "Tests failed"
+
+
+
+    # ====================
+    # Other Agents
+    # ====================
 
     else:
 
-        return f"Finished {task.description}"
-
+        return (
+            f"Finished {task.description}"
+        )
 
 def main():
 
