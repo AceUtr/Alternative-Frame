@@ -40,19 +40,28 @@ def main():
         )
     )
 
-    
+    registry.register(
+        DeterministicAgent(
+            role="developer",
+            handler=software_handler
+        )
+    )
 
-    
+    registry.register(
+        DeterministicAgent(
+            role="reviewer",
+            handler=software_handler
+        )
+    )
 
 
     orchestrator = Orchestrator(
-        registry
+        registry=registry
     )
 
 
     agent = MainAgent(
         orchestrator
-        planner=build
     )
 
 
