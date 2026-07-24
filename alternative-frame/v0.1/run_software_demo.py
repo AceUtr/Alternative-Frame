@@ -98,31 +98,40 @@ def add(a,b):
 
     elif task.role=="tester":
 
-
-        import subprocess
-
-
-        result=subprocess.run(
-            [
-                "pytest",
-                project
-            ],
-            capture_output=True,
-            text=True
-        )
+    import subprocess
 
 
-        print(result.stdout)
+    print("Running tests...")
 
 
-        if result.returncode==0:
+    test_file=f"{project}/test_app.py"
 
-            return "All tests passed"
 
-        else:
+    result=subprocess.run(
+        [
+            "pytest",
+            test_file,
+            "-v"
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30
+    )
 
-            return "Tests failed"
 
+    print("\nPytest output:")
+    print(result.stdout)
+
+
+    if result.returncode == 0:
+
+        return "All tests passed"
+
+    else:
+
+        print(result.stderr)
+
+        return "Tests failed"
 
 
     # ====================
