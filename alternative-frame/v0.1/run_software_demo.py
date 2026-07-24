@@ -3,15 +3,142 @@ from core.agents import AgentRegistry, DeterministicAgent
 from core.orchestrator import Orchestrator
 from domains.software_demo import build
 
+import os
+
+
 def software_handler(task, context):
 
     print("\n[Agent executing]")
+    print("Role:", task.role)
     print("Task:", task.description)
 
-    return (
-        f"Finished task: {task.description}"
+
+    project="examples/software_task"
+
+    app_file=f"{project}/app.py"
+
+
+    # ====================
+    # Analyst
+    # ====================
+
+    if task.role=="analyst":
+
+
+        if os.path.exists(app_file):
+
+            with open(
+                app_file,
+                "r",
+                encoding="utf8"
+            ) as f:
+
+                code=f.read()
+
+
+            print("\nCurrent Code:")
+            print(code)
+
+
+            if "-" in code:
+
+                return "Found bug: add function uses subtraction"
+
+            else:
+
+                return "No obvious bug found"
+
+
+        else:
+
+            return "app.py not found"
+
+
+
+    # ====================
+    # Developer
+    # ====================
+
+    elif task.role=="developer":
+
+
+        os.makedirs(
+            project,
+            exist_ok=True
+        )
+
+
+        with open(
+            app_file,
+            "w",
+            encoding="utf8"
+        ) as f:
+
+
+            f.write(
+"""
+def add(a,b):
+    return a+b
+"""
+            )
+
+
+        print(
+            "Developer fixed app.py"
+        )
+
+
+        return "Code modification completed"
+
+
+
+    # ====================
+    # Tester
+    # ====================
+
+    elif task.role=="tester":
+
+    import subprocess
+
+
+    print("Running tests...")
+
+
+    test_file=f"{project}/test_app.py"
+
+
+    result=subprocess.run(
+        [
+            "pytest",
+            test_file,
+            "-v"
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30
     )
 
+
+    print("\nPytest output:")
+    print(result.stdout)
+
+
+    if result.returncode == 0:
+
+        return "All tests passed"
+
+    else:
+
+        print(result.stderr)
+
+        return "Tests failed"
+
+
+    # ====================
+    # Other Agents
+    # ====================
+
+    
 
 def main():
 
@@ -40,19 +167,28 @@ def main():
         )
     )
 
-    
+    registry.register(
+        DeterministicAgent(
+            role="developer",
+            handler=software_handler
+        )
+    )
 
-    
+    registry.register(
+        DeterministicAgent(
+            role="reviewer",
+            handler=software_handler
+        )
+    )
 
 
     orchestrator = Orchestrator(
-        registry
+        registry=registry
     )
 
 
     agent = MainAgent(
         orchestrator
-        planner=build
     )
 
 

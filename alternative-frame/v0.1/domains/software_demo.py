@@ -10,7 +10,8 @@ def build(goal: str) -> Plan:
             role="analyst",
             description="读取软件项目文件，分析代码结构并定位问题",
             inputs=[
-                "examples/software_task"
+                "examples/software_task/app.py",
+                "examples/software_task/test_app.py"
             ],
             acceptance=[
                 "完成代码问题分析"
