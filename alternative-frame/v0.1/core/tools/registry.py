@@ -15,6 +15,12 @@ class ToolRegistry:
     def schemas(self):
         return [tool.schema() for tool in self._tools.values()]
 
+    def names(self):
+        return tuple(sorted(self._tools))
+
+    def has(self, name: str) -> bool:
+        return name in self._tools
+
     def execute(self, name: str, arguments: Dict[str, Any]) -> ToolResult:
         tool = self._tools.get(name)
         if tool is None:
@@ -23,4 +29,3 @@ class ToolRegistry:
             return tool.execute(arguments)
         except Exception as exc:
             return ToolResult(name, False, error=str(exc))
-

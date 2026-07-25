@@ -35,6 +35,9 @@ class AgentRegistry:
     def roles(self):
         return tuple(sorted(self._agents))
 
+    def has(self, role: str) -> bool:
+        return role in self._agents
+
 
 @dataclass
 class DeterministicAgent(Agent):
@@ -65,4 +68,3 @@ class DeterministicAgent(Agent):
                 started_at=started,
                 finished_at=utc_now(),
             )
-
