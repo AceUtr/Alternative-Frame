@@ -3,64 +3,221 @@ from core.models import Plan, SubTask
 
 def build(goal: str) -> Plan:
 
+
     tasks = [
 
+
+        # ======================
+        # 1. Requirement Analyst
+        # ======================
+
         SubTask(
-            id="analyze_project",
+            id="requirements_analysis",
+
             role="analyst",
-            description="读取软件项目文件，分析代码结构并定位问题",
+
+            description=
+            "读取需求文档，分析业务目标并生成验收条件",
+
             inputs=[
-                "examples/software_task/app.py",
-                "examples/software_task/test_app.py"
+                "examples/software_task/README.md",
+                "examples/software_task/requirements.md"
             ],
+
             acceptance=[
-                "完成代码问题分析"
+                "生成需求分析结果",
+                "明确功能验收条件"
             ],
+
             metadata={
-                "domain": "software_engineering"
+                "domain":
+                "software_engineering"
             }
         ),
 
 
+
+        # ======================
+        # 2. Architecture
+        # ======================
+
         SubTask(
-            id="modify_code",
+            id="architecture_design",
+
+            role="architect",
+
+            description=
+            "设计软件模块结构、接口和数据模型",
+
+            depends_on=[
+                "requirements_analysis"
+            ],
+
+            acceptance=[
+                "完成系统结构设计"
+            ],
+
+            metadata={
+                "domain":
+                "software_engineering"
+            }
+
+        ),
+
+
+
+
+        # ======================
+        # 3. Code Review
+        # ======================
+
+        SubTask(
+            id="code_review",
+
+            role="reviewer",
+
+            description=
+            "检查现有代码，定位缺陷并分析修改方案",
+
+            depends_on=[
+                "architecture_design"
+            ],
+
+            inputs=[
+                "examples/software_task/src/"
+            ],
+
+            acceptance=[
+                "发现代码问题",
+                "提供修复建议"
+            ],
+
+            metadata={
+                "domain":
+                "software_engineering"
+            }
+
+        ),
+
+
+
+
+
+        # ======================
+        # 4. Developer
+        # ======================
+
+        SubTask(
+            id="implementation",
+
             role="developer",
-            description="根据分析结果修改项目代码",
+
+            description=
+            "根据代码审查结果修改软件实现",
+
             depends_on=[
-                "analyze_project"
+                "code_review"
             ],
+
             acceptance=[
-                "代码修改完成"
+                "代码修改完成",
+                "功能符合需求"
             ],
+
             metadata={
-                "domain": "software_engineering"
+                "domain":
+                "software_engineering"
             }
+
         ),
 
 
+
+
+
+        # ======================
+        # 5. Tester
+        # ======================
+
         SubTask(
-            id="run_test",
+            id="testing",
+
             role="tester",
-            description="运行自动化测试验证代码修改结果",
+
+            description=
+            "执行自动化测试并验证修改结果",
+
             depends_on=[
-                "modify_code"
+                "implementation"
             ],
+
             acceptance=[
-                "测试全部通过"
+                "所有测试通过"
             ],
+
             metadata={
-                "domain": "software_engineering",
-                "command": "pytest"
+                "domain":
+                "software_engineering",
+
+                "command":
+                "pytest"
             }
+
+        ),
+
+
+
+
+
+        # ======================
+        # 6. Evidence Collector
+        # ======================
+
+        SubTask(
+            id="evidence_collection",
+
+            role="reporter",
+
+            description=
+            "收集代码修改记录、测试结果和运行证据",
+
+            depends_on=[
+                "testing"
+            ],
+
+            acceptance=[
+                "生成完整运行报告",
+                "保存测试日志"
+            ],
+
+            metadata={
+                "domain":
+                "software_engineering"
+            }
+
         )
+
     ]
 
 
+
     return Plan(
+
         goal=goal,
+
         subtasks=tasks,
+
+
         final_acceptance=[
-            "代码问题解决",
-            "自动化测试通过"
+
+            "需求分析完成",
+
+            "代码问题修复",
+
+            "自动化测试通过",
+
+            "生成运行证据"
+
         ]
+
     )
