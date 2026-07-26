@@ -1,0 +1,36 @@
+{
+  "id": "software",
+  "required_files": [
+    "domains/software_demo.py",
+    "run_software_demo.py",
+    "examples/software_task/README.md",
+    "examples/software_task/app.py",
+    "examples/software_task/test_app.py",
+    "prompts/software/software_prompt.md",
+    "tests/test_software_demo.py",
+    "docs/software-demo.md"
+  ],
+  "import_modules": [
+    "domains.software_demo"
+  ],
+  "required_symbols": {
+    "domains.software_demo": ["SoftwareDomainAdapter"]
+  },
+  "adapter": {
+    "module": "domains.software_demo",
+    "class": "SoftwareDomainAdapter"
+  },
+  "validation_goal": "Repair the supplied buggy application and prove the exact test command passes",
+  "test_commands": [
+    ["python", "-m", "pytest", "tests/test_software_demo.py", "-q", "-p", "no:cacheprovider"]
+  ],
+  "smoke_command": ["python", "run_software_demo.py"],
+  "scan_paths": [
+    "domains/software_demo.py",
+    "run_software_demo.py",
+    "examples/software_task",
+    "prompts/software",
+    "tests/test_software_demo.py",
+    "docs/software-demo.md"
+  ]
+}

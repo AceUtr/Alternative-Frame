@@ -1,0 +1,35 @@
+{
+  "id": "research",
+  "required_files": [
+    "domains/research_demo.py",
+    "run_research_demo.py",
+    "examples/research_task/README.md",
+    "prompts/research/research_prompt.md",
+    "tests/test_research_demo.py",
+    "docs/research-demo.md"
+  ],
+  "import_modules": [
+    "domains.research_demo"
+  ],
+  "required_symbols": {
+    "domains.research_demo": ["ResearchDomainAdapter"]
+  },
+  "adapter": {
+    "module": "domains.research_demo",
+    "class": "ResearchDomainAdapter"
+  },
+  "validation_goal": "Run a reproducible baseline and improved experiment, independently verify metrics, and produce a report",
+  "test_commands": [
+    ["python", "-m", "pytest", "tests/test_research_demo.py", "-q", "-p", "no:cacheprovider"]
+  ],
+  "smoke_command": ["python", "run_research_demo.py"],
+  "scan_paths": [
+    "domains/research_demo.py",
+    "domains/research_tools",
+    "run_research_demo.py",
+    "examples/research_task",
+    "prompts/research",
+    "tests/test_research_demo.py",
+    "docs/research-demo.md"
+  ]
+}

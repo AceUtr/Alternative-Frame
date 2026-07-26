@@ -13,6 +13,7 @@ from typing import Dict
 
 from core.agents import AgentRegistry, DeterministicAgent
 from core.acceptance import AcceptanceEvaluator
+from core.domains import DomainAdapter, DomainRegistry
 from core.local_recovery import LocalDAGRecoveryController
 from core.long_horizon import (
     AcceptanceContract,
@@ -29,12 +30,14 @@ from core.long_horizon import (
     ResilientReplanner,
     DeterministicRecoveryPlanner,
 )
+from core.long_horizon.state import plan_from_dict
 from core.tool_calling_agent import ToolCallingAgent
 from core.main_agent import MainAgent
 from core.model_client import ModelConfig, OpenAICompatibleClient
 from core.models import Plan, SubTask
 from core.orchestrator import Orchestrator, RunReport
 from core.planning import PlanningPipeline
+from core.preflight import HarnessPreflightChecker
 from core.tools import ExperimentRunner, FileEditor, GitClient, ShellRunner, TestRunner, ToolRegistry
 from run_api_demo import ROLE_PROMPTS
 
@@ -103,6 +106,67 @@ def build_registry(client=None, workspace=None, on_tool_event=None, tool_test: b
                 )
             )
     return registry
+
+
+def build_capability_registry(workspace: Path) -> ToolRegistry:
+    """Describe all tools available to UI roles for preflight validation."""
+    shell = ShellRunner(workspace)
+    return ToolRegistry([
+        FileEditor(workspace),
+        shell,
+        TestRunner(shell),
+        GitClient(workspace),
+        ExperimentRunner(shell),
+    ])
+
+
+class UIRuntimeDomainAdapter(DomainAdapter):
+    """Compatibility adapter until each team domain supplies its own adapter."""
+
+    def __init__(self, name: str, plan: Plan, contract: AcceptanceContract):
+        self.name = name
+        self._plan = plan
+        self._contract = contract
+
+    def register_tools(self, registry, workspace):
+        return None
+
+    def build_agents(self, model_client, tools):
+        return []
+
+    def build_plan(self, goal):
+        if goal.strip() != self._plan.goal.strip():
+            raise ValueError("runtime goal does not match the prepared plan")
+        return self._plan
+
+    def build_contract(self, goal):
+        if goal.strip() != self._contract.goal.strip():
+            raise ValueError("runtime goal does not match the prepared contract")
+        return self._contract
+
+
+def run_ui_preflight(
+    *,
+    domain: str,
+    plan: Plan,
+    contract: AcceptanceContract,
+    agents: AgentRegistry,
+    workspace: Path,
+    model_probe=None,
+):
+    adapter = UIRuntimeDomainAdapter(domain, plan, contract)
+    domains = DomainRegistry([adapter])
+    capabilities = build_capability_registry(workspace)
+    return HarnessPreflightChecker().check(
+        domains=domains,
+        domain=domain,
+        plan=plan,
+        agents=agents,
+        tools=capabilities,
+        workspace=workspace,
+        contract=contract,
+        model_probe=model_probe,
+    )
 
 
 def build_tool_test_plan(goal: str) -> Plan:
@@ -586,9 +650,11 @@ class FreshUI(tk.Tk):
         table_tab = tk.Frame(self.dag_tabs, bg=COLORS["card"])
         graph_tab = tk.Frame(self.dag_tabs, bg=COLORS["card"])
         evidence_tab = tk.Frame(self.dag_tabs, bg=COLORS["card"])
+        preflight_tab = tk.Frame(self.dag_tabs, bg=COLORS["card"])
         self.dag_tabs.add(table_tab, text="任务表")
         self.dag_tabs.add(graph_tab, text="DAG")
         self.dag_tabs.add(evidence_tab, text="验收证据")
+        self.dag_tabs.add(preflight_tab, text="环境预检")
 
         cols = ("task", "role", "depends", "status", "attempts")
         self.tree = ttk.Treeview(table_tab, columns=cols, show="headings", height=11)
@@ -621,6 +687,21 @@ class FreshUI(tk.Tk):
         self.evidence_tree.tag_configure("failed", foreground=COLORS["danger"])
         self.evidence_tree.tag_configure("deferred", foreground=COLORS["blue_dark"])
         self.evidence_tree.pack(fill=tk.BOTH, expand=True)
+
+        preflight_cols = ("check", "status", "detail")
+        self.preflight_tree = ttk.Treeview(
+            preflight_tab, columns=preflight_cols, show="headings", height=11
+        )
+        for key, title, width in [
+            ("check", "检查项", 170),
+            ("status", "状态", 90),
+            ("detail", "结果", 390),
+        ]:
+            self.preflight_tree.heading(key, text=title)
+            self.preflight_tree.column(key, width=width, anchor=tk.W)
+        self.preflight_tree.tag_configure("passed", foreground=COLORS["success"])
+        self.preflight_tree.tag_configure("failed", foreground=COLORS["danger"])
+        self.preflight_tree.pack(fill=tk.BOTH, expand=True)
 
     def _log_card(self, card):
         inner = tk.Frame(card, bg=COLORS["card"], padx=14, pady=12)
@@ -786,6 +867,7 @@ class FreshUI(tk.Tk):
         self.dag_canvas.delete("all")
         self.dag_nodes.clear()
         self._render_evidence([])
+        self._render_preflight(None)
         self.task_items.clear()
         self._set_state("运行中", COLORS["blue_dark"])
         self.append_log(f"MainAgent ← {goal}")
@@ -844,6 +926,7 @@ class FreshUI(tk.Tk):
                 workspace = TOOL_TEST_WORKSPACE
             else:
                 workspace = PROJECT_DIR
+                domain = pipeline.intent_parser.parse(goal).domain
                 if execution_mode == "标准多 Agent":
                     intent = pipeline.intent_parser.parse(goal)
                     drafts = pipeline.decomposer.decompose(intent)
@@ -863,6 +946,24 @@ class FreshUI(tk.Tk):
                 on_tool_event=on_tool_event,
                 tool_test=tool_test,
             )
+
+            def model_probe():
+                if client is None:
+                    return True, "local stub mode"
+                response = client.chat([{"role": "user", "content": "Reply with OK only."}])
+                return bool(response.get("content", "").strip()), response.get("content", "empty response")
+
+            def enforce_preflight(check_plan, check_contract):
+                report = run_ui_preflight(
+                    domain=domain,
+                    plan=check_plan,
+                    contract=check_contract,
+                    agents=registry,
+                    workspace=workspace,
+                    model_probe=model_probe if client else None,
+                )
+                self.events.put(("preflight_report", report))
+                report.require_ready()
 
             def on_event(event, task, result=None):
                 self.events.put((
@@ -959,6 +1060,13 @@ class FreshUI(tk.Tk):
                 if initial_plan:
                     self.events.put(("contract_plan", initial_plan))
 
+                preflight_plan = initial_plan
+                if preflight_plan is None and persisted_state and persisted_state.pending_plan:
+                    preflight_plan = plan_from_dict(persisted_state.pending_plan)
+                if preflight_plan is None:
+                    preflight_plan = RuleBasedContractPlanner().build(contract, task_budget=50)
+                enforce_preflight(preflight_plan, contract)
+
                 if client:
                     global_evaluator = StructuredGlobalEvaluator(
                         client=client,
@@ -995,6 +1103,8 @@ class FreshUI(tk.Tk):
                 report = controller.run(goal, run_id=resume_run_id, resume=bool(resume_run_id))
                 self.events.put(("long_horizon_report", (report, store.state_path(report.state.run_id))))
             else:
+                standard_contract = AcceptanceContract.from_plan(goal, plan)
+                enforce_preflight(plan, standard_contract)
                 main = MainAgent(orchestrator, pipeline.build)
                 report = main.orchestrator.run(plan)
                 self.events.put(("report", report))
@@ -1058,6 +1168,21 @@ class FreshUI(tk.Tk):
                         f"CONTRACT PLANNER → 初始 DAG 已覆盖合同 · tasks={len(payload.subtasks)} · "
                         f"required={len(payload.final_acceptance)}"
                     )
+                elif kind == "preflight_report":
+                    self._render_preflight(payload)
+                    self.dag_tabs.select(3)
+                    if payload.ready:
+                        self.append_log(
+                            f"PREFLIGHT -> passed | domain={payload.domain} | checks={len(payload.checks)}"
+                        )
+                        self._set_state("环境预检通过，开始执行", COLORS["success"])
+                    else:
+                        self.append_log(
+                            f"PREFLIGHT -> blocked | domain={payload.domain} | issues={len(payload.issues)}"
+                        )
+                        for issue in payload.issues:
+                            self.append_log(f"  BLOCK -> {issue.code}: {issue.message}")
+                        self._set_state("环境预检失败，任务未启动", COLORS["danger"])
                 elif kind == "controller_ready":
                     self.pause_btn.configure(state=tk.NORMAL)
                 elif kind == "run_cancelled":
@@ -1097,6 +1222,26 @@ class FreshUI(tk.Tk):
         self.pause_btn.configure(state=tk.DISABLED)
         color = COLORS["success"] if report.status == "success" else COLORS["danger"]
         self._set_state(f"完成 · {report.status} · {report.rounds} 轮", color)
+
+    def _render_preflight(self, report):
+        for item in self.preflight_tree.get_children():
+            self.preflight_tree.delete(item)
+        if report is None:
+            self.preflight_tree.insert(
+                "", tk.END, values=("等待检查", "未运行", "点击开始任务后自动检查")
+            )
+            return
+        for check in report.checks:
+            name, _, detail = str(check).partition("=")
+            self.preflight_tree.insert(
+                "", tk.END, values=(name, "通过", detail or check), tags=("passed",)
+            )
+        for issue in report.issues:
+            status = "阻塞" if issue.blocking else "警告"
+            tag = "failed" if issue.blocking else ""
+            self.preflight_tree.insert(
+                "", tk.END, values=(issue.code, status, issue.message), tags=(tag,)
+            )
 
     def _show_task_event(self, payload):
         event, task_id, result, runtime_attempt = payload

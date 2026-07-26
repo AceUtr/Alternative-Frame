@@ -1,0 +1,32 @@
+{
+  "id": "edge-cloud",
+  "required_files": [
+    "core/runtime_nodes/__init__.py",
+    "core/routing/__init__.py",
+    "run_edge_cloud_demo.py",
+    "tests/test_node_routing.py",
+    "tests/test_runtime_fallback.py",
+    "docs/edge-cloud.md"
+  ],
+  "import_modules": [
+    "core.runtime_nodes",
+    "core.routing"
+  ],
+  "required_symbols": {
+    "core.runtime_nodes": ["ExecutionNode", "DeviceNode", "EdgeNode", "CloudNode", "RuntimeExecutor"],
+    "core.routing": ["TaskRequirements", "PlacementDecision", "NodeRouter"]
+  },
+  "test_commands": [
+    ["python", "-m", "pytest", "tests/test_node_routing.py", "tests/test_runtime_fallback.py", "-q", "-p", "no:cacheprovider"]
+  ],
+  "smoke_command": ["python", "run_edge_cloud_demo.py"],
+  "scan_paths": [
+    "core/runtime_nodes",
+    "core/routing",
+    "run_edge_cloud_demo.py",
+    "examples/edge_cloud",
+    "tests/test_node_routing.py",
+    "tests/test_runtime_fallback.py",
+    "docs/edge-cloud.md"
+  ]
+}

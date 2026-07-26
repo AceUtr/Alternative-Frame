@@ -1,4 +1,0 @@
-{"time": "2026-07-22T08:03:43.253640+00:00", "event": "run_started", "payload": {"resume": true}}
-{"time": "2026-07-22T08:03:43.255082+00:00", "event": "phase_planned", "payload": {"phase": 1, "plan_goal": "resume phase", "tasks": [{"id": "resume-task", "role": "worker", "depends_on": []}]}}
-{"time": "2026-07-22T08:03:43.256402+00:00", "event": "phase_finished", "payload": {"phase": 1, "completed": true, "reason": "all phase tasks and their acceptance checks passed", "satisfied_criteria": [], "missing_criteria": [], "failures": [], "next_focus": [], "evidence": ["phase_tasks_passed=1"]}}
-{"time": "2026-07-22T08:03:43.257886+00:00", "event": "run_completed", "payload": {"phase": 1}}
