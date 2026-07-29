@@ -1,0 +1,17 @@
+{
+  "dataset_version": "synthetic-centroids-v2",
+  "seed": 1729,
+  "rows": 200,
+  "train_rows": 160,
+  "test_rows": 40,
+  "columns": [
+    "id",
+    "label",
+    "x1",
+    "x2"
+  ],
+  "label_distribution": {
+    "0": 100,
+    "1": 100
+  }
+}
