@@ -1,6 +1,12 @@
 {
   "dataset_version": "synthetic-centroids-v2",
   "seed": 1729,
+  "provenance": {
+    "source": "synthetic_generated",
+    "generator": "generate_dataset.py",
+    "license": "project_fixture"
+  },
+  "sha256": "b8a1cb423374acdad05c5c0bc13c5ec97c8088bed73e0cb14aa64064bbf795dd",
   "rows": 200,
   "train_rows": 160,
   "test_rows": 40,

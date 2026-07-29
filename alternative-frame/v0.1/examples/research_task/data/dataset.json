@@ -2,6 +2,11 @@
   "metadata": {
     "dataset_version": "synthetic-centroids-v2",
     "seed": 1729,
+    "provenance": {
+      "source": "synthetic_generated",
+      "generator": "generate_dataset.py",
+      "license": "project_fixture"
+    },
     "split": {
       "train_rows": 160,
       "test_rows": 40

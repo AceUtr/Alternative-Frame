@@ -35,6 +35,11 @@ def generate(output_path: Path) -> dict[str, object]:
         "metadata": {
             "dataset_version": DATASET_VERSION,
             "seed": SEED,
+            "provenance": {
+                "source": "synthetic_generated",
+                "generator": "generate_dataset.py",
+                "license": "project_fixture",
+            },
             "split": {"train_rows": TRAIN_ROWS, "test_rows": TEST_ROWS},
             "features": ["x1", "x2"],
             "target": "label",

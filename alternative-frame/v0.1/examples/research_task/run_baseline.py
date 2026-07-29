@@ -18,7 +18,9 @@ def _load_dataset(path: Path) -> dict[str, object]:
     return payload
 
 
-def _fit_centroids(rows: list[dict[str, object]]) -> dict[int, tuple[float, ...]]:
+def _fit_centroids(
+    rows: list[dict[str, object]], features: tuple[str, ...]
+) -> dict[int, tuple[float, ...]]:
     grouped: dict[int, list[dict[str, object]]] = {0: [], 1: []}
     for row in rows:
         grouped[int(row["label"])].append(row)
@@ -27,32 +29,44 @@ def _fit_centroids(rows: list[dict[str, object]]) -> dict[int, tuple[float, ...]
     return {
         label: tuple(
             sum(float(row[feature]) for row in label_rows) / len(label_rows)
-            for feature in FEATURES
+            for feature in features
         )
         for label, label_rows in grouped.items()
     }
 
 
-def _predict(row: dict[str, object], centroids: dict[int, tuple[float, ...]]) -> int:
+def _predict(
+    row: dict[str, object],
+    centroids: dict[int, tuple[float, ...]],
+    features: tuple[str, ...],
+) -> int:
     distances = {
         label: sum(
             (float(row[feature]) - centroid[index]) ** 2
-            for index, feature in enumerate(FEATURES)
+            for index, feature in enumerate(features)
         )
         for label, centroid in centroids.items()
     }
     return min(distances, key=lambda label: (distances[label], label))
 
 
-def run(dataset_path: Path, output_path: Path) -> dict[str, object]:
+def run(
+    dataset_path: Path,
+    output_path: Path,
+    *,
+    features: tuple[str, ...] = FEATURES,
+    experiment_name: str = BASELINE_NAME,
+) -> dict[str, object]:
     dataset = _load_dataset(dataset_path)
     train = list(dataset["train"])
     test = list(dataset["test"])
-    centroids = _fit_centroids(train)
-    correct = sum(_predict(row, centroids) == int(row["label"]) for row in test)
+    centroids = _fit_centroids(train, features)
+    correct = sum(
+        _predict(row, centroids, features) == int(row["label"]) for row in test
+    )
     accuracy = correct / len(test)
     metrics = {
-        "experiment": BASELINE_NAME,
+        "experiment": experiment_name,
         "dataset_version": dataset["metadata"]["dataset_version"],
         "seed": dataset["metadata"]["seed"],
         "train_rows": len(train),
@@ -60,7 +74,7 @@ def run(dataset_path: Path, output_path: Path) -> dict[str, object]:
         "metric_name": "accuracy",
         "accuracy": round(accuracy, 6),
         "correct": correct,
-        "features_used": list(FEATURES),
+        "features_used": list(features),
         "centroids": {
             str(label): [round(value, 8) for value in values]
             for label, values in centroids.items()

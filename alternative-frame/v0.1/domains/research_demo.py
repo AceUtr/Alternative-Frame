@@ -15,7 +15,7 @@ from core.long_horizon import AcceptanceContract, GoalCriterion
 from core.models import AgentResult, Plan, SubTask, utc_now
 from core.tools import ExperimentRunner, ShellRunner, ToolRegistry
 
-from .research_tools import DatasetInspector
+from .research_tools import DatasetInspector, MetricComparator, ResearchReportBuilder
 
 
 GENERATOR_COMMAND = "python generate_dataset.py --output data/dataset.json"
@@ -23,6 +23,23 @@ BASELINE_COMMAND = (
     "python run_baseline.py --dataset data/dataset.json "
     "--output artifacts/baseline_metrics.json"
 )
+IMPROVED_COMMAND = (
+    "python run_improved.py --dataset data/dataset.json "
+    "--output artifacts/improved_metrics.json"
+)
+VERIFICATION_COMMAND = (
+    "python verify_best.py --dataset data/dataset.json "
+    "--config artifacts/best_config.json "
+    "--output artifacts/verification_metrics.json"
+)
+REPORT_ARGUMENTS = {
+    "baseline_metrics_path": "artifacts/baseline_metrics.json",
+    "improved_metrics_path": "artifacts/improved_metrics.json",
+    "best_config_path": "artifacts/best_config.json",
+    "verification_metrics_path": "artifacts/verification_metrics.json",
+    "chart_path": "artifacts/comparison.png",
+    "report_path": "artifacts/research_report.md",
+}
 
 
 class ResearchExecutionAgent(Agent):
@@ -80,6 +97,11 @@ class ResearchDomainAdapter(DomainAdapter):
         "data/dataset.json",
         "artifacts/dataset_summary.json",
         "artifacts/baseline_metrics.json",
+        "artifacts/improved_metrics.json",
+        "artifacts/best_config.json",
+        "artifacts/verification_metrics.json",
+        "artifacts/comparison.png",
+        "artifacts/research_report.md",
     )
 
     def register_tools(self, registry: ToolRegistry, workspace: Path) -> None:
@@ -87,6 +109,8 @@ class ResearchDomainAdapter(DomainAdapter):
         shell = ShellRunner(workspace, timeout_seconds=120)
         registry.register(ExperimentRunner(shell))
         registry.register(DatasetInspector(workspace))
+        registry.register(MetricComparator(workspace))
+        registry.register(ResearchReportBuilder(workspace))
 
     def build_agents(self, model_client, tools: ToolRegistry):
         return [
@@ -141,6 +165,14 @@ class ResearchDomainAdapter(DomainAdapter):
                             "dataset_path": "data/dataset.json",
                             "output_path": "artifacts/dataset_summary.json",
                             "required_fields": ["x1", "x2", "label"],
+                            "field_types": {
+                                "id": "integer",
+                                "x1": "number",
+                                "x2": "number",
+                                "label": "integer",
+                            },
+                            "allowed_labels": [0, 1],
+                            "required_provenance": ["source", "generator", "license"],
                         },
                     },
                 },
@@ -165,6 +197,7 @@ class ResearchDomainAdapter(DomainAdapter):
                             "check_type": "metric",
                             "metric_name": "accuracy",
                             "threshold": 0.8,
+                            "mode": "max",
                         },
                     ],
                     "contract_criteria": [
@@ -177,6 +210,98 @@ class ResearchDomainAdapter(DomainAdapter):
                     },
                 },
             ),
+            SubTask(
+                id="run_improved",
+                role="research_experiment",
+                description="Fit and evaluate the two-feature improved configuration.",
+                depends_on=["inspect_dataset"],
+                max_retries=0,
+                metadata={
+                    "required_tools": ["experiment_runner"],
+                    "expected_outputs": ["artifacts/improved_metrics.json"],
+                    "checks": [
+                        {
+                            "id": "improved_metrics",
+                            "check_type": "file_exists",
+                            "path": "artifacts/improved_metrics.json",
+                        },
+                        {
+                            "id": "improved_accuracy",
+                            "check_type": "metric",
+                            "metric_name": "accuracy",
+                            "threshold": 0.9,
+                            "mode": "max",
+                        },
+                    ],
+                    "contract_criteria": ["improved_metrics", "improved_accuracy"],
+                    "execution": {
+                        "tool": "experiment_runner",
+                        "arguments": {"command": IMPROVED_COMMAND},
+                    },
+                },
+            ),
+            SubTask(
+                id="compare_experiments",
+                role="research_experiment",
+                description="Compare compatible baseline and improved metric files.",
+                depends_on=["run_baseline", "run_improved"],
+                max_retries=0,
+                metadata={
+                    "required_tools": ["metric_comparator"],
+                    "expected_outputs": ["artifacts/best_config.json"],
+                    "checks": [
+                        {
+                            "id": "best_config",
+                            "check_type": "file_exists",
+                            "path": "artifacts/best_config.json",
+                        }
+                    ],
+                    "contract_criteria": ["best_config"],
+                    "execution": {
+                        "tool": "metric_comparator",
+                        "arguments": {
+                            "metric_files": [
+                                "artifacts/baseline_metrics.json",
+                                "artifacts/improved_metrics.json",
+                            ],
+                            "primary_metric": "accuracy",
+                            "mode": "max",
+                            "output_path": "artifacts/best_config.json",
+                        },
+                    },
+                },
+            ),
+            SubTask(
+                id="build_initial_report",
+                role="research_experiment",
+                description="Build the initial chart and report with verification pending.",
+                depends_on=["compare_experiments"],
+                max_retries=0,
+                metadata={
+                    "required_tools": ["research_report_builder"],
+                    "expected_outputs": [
+                        "artifacts/comparison.png",
+                        "artifacts/research_report.md",
+                    ],
+                    "checks": [
+                        {
+                            "id": "comparison_chart",
+                            "check_type": "file_exists",
+                            "path": "artifacts/comparison.png",
+                        },
+                        {
+                            "id": "research_report",
+                            "check_type": "file_exists",
+                            "path": "artifacts/research_report.md",
+                        },
+                    ],
+                    "contract_criteria": ["comparison_chart", "research_report"],
+                    "execution": {
+                        "tool": "research_report_builder",
+                        "arguments": dict(REPORT_ARGUMENTS),
+                    },
+                },
+            ),
         ]
         return Plan(
             goal=goal,
@@ -186,6 +311,11 @@ class ResearchDomainAdapter(DomainAdapter):
                 "dataset_summary",
                 "baseline_metrics",
                 "baseline_accuracy",
+                "improved_metrics",
+                "improved_accuracy",
+                "best_config",
+                "comparison_chart",
+                "research_report",
             ],
         )
 
@@ -219,12 +349,138 @@ class ResearchDomainAdapter(DomainAdapter):
                     metric_name="accuracy",
                     threshold=0.8,
                 ),
+                GoalCriterion(
+                    "improved_metrics",
+                    "Improved metrics JSON exists",
+                    "file_exists",
+                    path="artifacts/improved_metrics.json",
+                ),
+                GoalCriterion(
+                    "improved_accuracy",
+                    "Improved experiment reaches the declared accuracy",
+                    "metric",
+                    metric_name="accuracy",
+                    threshold=0.9,
+                ),
+                GoalCriterion(
+                    "best_config",
+                    "Best configuration is selected from compatible metrics",
+                    "file_exists",
+                    path="artifacts/best_config.json",
+                ),
+                GoalCriterion(
+                    "verification_metrics",
+                    "Best configuration is independently rerun",
+                    "file_exists",
+                    path="artifacts/verification_metrics.json",
+                ),
+                GoalCriterion(
+                    "verification_command",
+                    "Independent verification command exits successfully",
+                    "command",
+                    command=VERIFICATION_COMMAND,
+                ),
+                GoalCriterion(
+                    "comparison_chart",
+                    "Metric comparison chart exists",
+                    "file_exists",
+                    path="artifacts/comparison.png",
+                ),
+                GoalCriterion(
+                    "research_report",
+                    "Research report exists",
+                    "file_exists",
+                    path="artifacts/research_report.md",
+                ),
             ],
             constraints=[
                 "Offline execution only",
                 "Python 3.10+ standard library only",
                 "Dataset seed and split are fixed",
                 "Metrics must come from an experiment tool call",
+            ],
+        )
+
+    def build_recovery_plan(self, goal: str) -> Plan:
+        """Build phase two that fills the real independent-verification gap."""
+        return Plan(
+            goal=goal,
+            subtasks=[
+                SubTask(
+                    id="verify_best",
+                    role="research_experiment",
+                    description="Independently rerun the selected best configuration.",
+                    max_retries=0,
+                    metadata={
+                        "required_tools": ["experiment_runner"],
+                        "expected_outputs": ["artifacts/verification_metrics.json"],
+                        "checks": [
+                            {
+                                "id": "verification_metrics",
+                                "check_type": "file_exists",
+                                "path": "artifacts/verification_metrics.json",
+                            },
+                            {
+                                "id": "verification_accuracy",
+                                "check_type": "metric",
+                                "metric_name": "accuracy",
+                                "threshold": 0.9,
+                                "mode": "max",
+                            },
+                            {
+                                "id": "verification_command",
+                                "check_type": "command",
+                                "command": VERIFICATION_COMMAND,
+                            },
+                        ],
+                        "contract_criteria": [
+                            "verification_metrics",
+                            "verification_accuracy",
+                            "verification_command",
+                        ],
+                        "execution": {
+                            "tool": "experiment_runner",
+                            "arguments": {"command": VERIFICATION_COMMAND},
+                        },
+                    },
+                ),
+                SubTask(
+                    id="update_research_report",
+                    role="research_experiment",
+                    description="Update chart and report with independent verification evidence.",
+                    depends_on=["verify_best"],
+                    max_retries=0,
+                    metadata={
+                        "required_tools": ["research_report_builder"],
+                        "expected_outputs": [
+                            "artifacts/comparison.png",
+                            "artifacts/research_report.md",
+                        ],
+                        "checks": [
+                            {
+                                "id": "comparison_chart",
+                                "check_type": "file_exists",
+                                "path": "artifacts/comparison.png",
+                            },
+                            {
+                                "id": "research_report",
+                                "check_type": "file_exists",
+                                "path": "artifacts/research_report.md",
+                            },
+                        ],
+                        "contract_criteria": ["comparison_chart", "research_report"],
+                        "execution": {
+                            "tool": "research_report_builder",
+                            "arguments": dict(REPORT_ARGUMENTS),
+                        },
+                    },
+                ),
+            ],
+            final_acceptance=[
+                "verification_metrics",
+                "verification_command",
+                "comparison_chart",
+                "research_report",
             ],
         )
 

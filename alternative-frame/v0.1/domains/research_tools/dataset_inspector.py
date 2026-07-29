@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter
 from pathlib import Path
@@ -42,6 +43,15 @@ class DatasetInspector(Tool):
                             "type": "array",
                             "items": {"type": "string"},
                         },
+                        "field_types": {"type": "object"},
+                        "allowed_labels": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                        },
+                        "required_provenance": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
                     },
                     "required": ["dataset_path", "output_path"],
                 },
@@ -55,6 +65,14 @@ class DatasetInspector(Tool):
         except ValueError as exc:
             return ToolResult(self.name, False, error=str(exc))
         required = arguments.get("required_fields", ["x1", "x2", "label"])
+        field_types = arguments.get(
+            "field_types",
+            {"id": "integer", "x1": "number", "x2": "number", "label": "integer"},
+        )
+        allowed_labels = arguments.get("allowed_labels", [0, 1])
+        required_provenance = arguments.get(
+            "required_provenance", ["source", "generator", "license"]
+        )
         if not isinstance(required, list) or not required or not all(
             isinstance(item, str) and item for item in required
         ):
@@ -63,6 +81,11 @@ class DatasetInspector(Tool):
             return ToolResult(self.name, False, error=f"dataset not found: {arguments['dataset_path']}")
         try:
             payload = json.loads(dataset_path.read_text(encoding="utf-8"))
+            metadata = payload["metadata"]
+            provenance = metadata["provenance"]
+            missing_provenance = sorted(set(required_provenance) - set(provenance))
+            if missing_provenance:
+                raise ValueError(f"provenance missing fields: {missing_provenance}")
             train = payload["train"]
             test = payload["test"]
             rows = list(train) + list(test)
@@ -72,9 +95,31 @@ class DatasetInspector(Tool):
                 missing = sorted(set(required) - set(row))
                 if missing:
                     raise ValueError(f"row {index} missing fields: {missing}")
+                for field, expected_type in field_types.items():
+                    if field not in row:
+                        raise ValueError(f"row {index} missing typed field: {field}")
+                    value = row[field]
+                    valid = {
+                        "integer": isinstance(value, int) and not isinstance(value, bool),
+                        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+                        "string": isinstance(value, str),
+                    }.get(expected_type)
+                    if valid is None:
+                        raise ValueError(f"unsupported field type: {expected_type}")
+                    if not valid:
+                        raise ValueError(
+                            f"row {index} field {field} must be {expected_type}"
+                        )
+                if row["label"] not in allowed_labels:
+                    raise ValueError(f"row {index} has invalid label: {row['label']}")
+            ids = [row["id"] for row in rows]
+            if len(ids) != len(set(ids)):
+                raise ValueError("dataset ids must be unique")
             summary = {
-                "dataset_version": payload.get("metadata", {}).get("dataset_version"),
-                "seed": payload.get("metadata", {}).get("seed"),
+                "dataset_version": metadata.get("dataset_version"),
+                "seed": metadata.get("seed"),
+                "provenance": provenance,
+                "sha256": hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
                 "rows": len(rows),
                 "train_rows": len(train),
                 "test_rows": len(test),

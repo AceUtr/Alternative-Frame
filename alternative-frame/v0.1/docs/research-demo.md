@@ -1,6 +1,6 @@
 # 科研长程 Demo：审计与适配设计
 
-状态：B1 第一阶段已实现，待队长审核  
+状态：B2 两阶段科研闭环已实现，待队长审核
 分支：`feature/research-demo`
 
 ## 1. 目标与边界
@@ -112,7 +112,8 @@ Tool.execute()
 - 主指标：测试集 `accuracy`，越高越好；
 - 依赖：Python 3.10+ 标准库，不访问公网，不读取 API Key。
 
-候选改进实验、图表和长程恢复不属于第一阶段。
+第一阶段接口审查通过后，第二阶段已在同一 Fixture 上增加双特征 improved 实验、
+指标比较、独立复验、PNG 图表、Markdown 报告和两阶段长程恢复。
 固定种子下当前 baseline accuracy 为 `0.80`，处于预定的 `0.75～0.90`
 区间。数据同时保留第二个有效特征，但第一阶段 baseline 不使用它，为后续真实改进
 保留空间；任何后续提升仍必须由独立实验命令产生，不能改写或写死指标。
@@ -272,11 +273,11 @@ run_baseline       run_candidate
 
 所有依赖只引用同一 `Plan` 中存在的任务 ID，计划必须通过 `Plan.validate()`。
 
-## 7. 后续阶段的两阶段长程闭环
+## 7. 已实现的两阶段长程闭环
 
-本节描述接口审查通过后的目标，不属于当前第一阶段实现。后续阶段将执行数据检查、
-baseline、候选实验、比较和初始报告，并保留一个可被硬证据门禁发现的合理缺口。
-优先选择“缺少独立复验结果”，而不是在代码中根据阶段编号伪造失败。
+第一阶段执行数据检查、baseline、候选实验、比较和初始报告，并保留一个可被硬证据
+门禁发现的真实缺口：没有 `verification_metrics.json` 和复验命令记录。Replanner
+根据全局验收返回的缺失条款生成复验计划，不根据阶段编号伪造失败。
 
 ```text
 第一阶段真实实验
@@ -369,10 +370,10 @@ run_research_demo.py
 ```
 
 当前设计和实现均未修改 `core/` 或主 `ui.py`。
-`ResearchDomainAdapter.reset_workspace()` 只删除三个已知生成文件，并保留 Fixture
+`ResearchDomainAdapter.reset_workspace()` 只删除声明过的生成文件，并保留 Fixture
 源码和其他未知文件；重复调用得到相同的干净初始状态。
-`run_research_demo.py` 仅作为第一阶段真实 baseline smoke 入口，不包含候选实验、
-图表、报告或长程恢复。
+`run_research_demo.py` 使用现有 `LongHorizonController` 运行两阶段真实科研闭环，
+没有创建第二套状态机或长程循环。
 
 ## 11. 已知风险与待确认事项
 
@@ -391,7 +392,8 @@ run_research_demo.py
 2. 接受“复用科研模式和确定性评测设计”，不默认执行 H100 训练；
 3. 第一阶段使用固定生成数据、最近类中心 baseline 和 accuracy。
 
-仍需后续阶段确认改进实验的具体方案与长程恢复演示入口。
+第二阶段已采用双特征最近类中心方案作为可解释的 improved experiment；后续若扩展
+算法搜索空间，仍需保持同一数据、划分、种子和评分规则。
 
 ## 12. `autoresearch-master` 复用清单
 
@@ -426,7 +428,7 @@ run_research_demo.py
 | 保存实验结果 | 写入 `artifacts/baseline_metrics.json` |
 | 失败不伪装成功 | 非零退出码或缺少预期文件均返回失败 |
 | 按 Run ID 保存历史 | 当前未实现；后续交给现有 `LongHorizonStore`，不另建存储框架 |
-| baseline/改进比较 | 当前只实现 baseline；改进与比较属于接口审查后的下一阶段 |
+| baseline/改进比较 | baseline 使用 `x1`，improved 使用 `x1+x2`，由 `MetricComparator` 读取 JSON 比较 |
 | Prompt 评测 | 禁用；完整路径需要模型 API 和 API Key |
 | GPU 训练 | 禁用；原实现需要 CUDA、NVIDIA GPU 和联网准备数据 |
 
@@ -447,5 +449,18 @@ inspect_dataset
 run_baseline
 ```
 
-第一阶段刻意不包含候选改进实验、比较器、图表、报告生成器和
-`LongHorizonController` 恢复闭环。这些属于后续阶段。
+第二阶段在上述数据流后增加：
+
+```text
+run_baseline -----+
+                  +--> compare_experiments --> build_initial_report
+run_improved -----+                              |
+                                                 v
+                                  global gate rejects missing verification
+                                                 |
+                                      verify_best --> update_research_report
+                                                 |
+                                           completed
+```
+
+真实固定结果为 baseline `0.80`、improved `0.95`、独立复验 `0.95`。
