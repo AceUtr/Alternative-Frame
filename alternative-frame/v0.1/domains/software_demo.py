@@ -20,8 +20,9 @@ def build(goal: str) -> Plan:
             "读取需求文档，分析业务目标并生成验收条件",
 
             inputs=[
+                "examples/software_task/requirements.md",
                 "examples/software_task/README.md",
-                "examples/software_task/requirements.md"
+                "examples/software_task/test_app.py"
             ],
 
             acceptance=[
