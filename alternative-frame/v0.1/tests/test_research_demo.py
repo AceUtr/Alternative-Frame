@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from core.acceptance import AcceptanceEvaluator
 from core.domains import DomainRegistry
 from core.long_horizon.contract_validator import ContractValidator
+from core.long_horizon import DeterministicGlobalEvaluator, LongHorizonState
 from core.orchestrator import Orchestrator
 from core.preflight import HarnessPreflightChecker
 from core.tools import ToolRegistry
@@ -254,6 +255,8 @@ def test_recovery_plan_independently_verifies_and_updates_report(tmp_path):
         (workspace / "artifacts/best_config.json").read_text(encoding="utf-8")
     )
     assert verification["accuracy"] == best["best_score"]
+    assert verification["verification_passed"] is True
+    assert verification["verification_delta"] <= verification["verification_tolerance"]
     assert verification["verified_experiment"] == best["best_experiment"]
     record = recovery.results["verify_best"].tool_records[0]
     assert record["exit_code"] == 0
@@ -262,6 +265,60 @@ def test_recovery_plan_independently_verifies_and_updates_report(tmp_path):
         encoding="utf-8"
     )
     assert "Independent verification: **passed**" in final_report
+
+
+def test_tampered_best_score_fails_verification_and_global_contract(tmp_path):
+    workspace = _workspace(tmp_path)
+    adapter = ResearchDomainAdapter()
+    _, agents = adapter.configure(workspace)
+    orchestrator = Orchestrator(agents, acceptance=AcceptanceEvaluator(workspace))
+    goal = "reject a tampered best score"
+
+    initial = orchestrator.run(adapter.build_plan(goal), parallel=False)
+    best_path = workspace / "artifacts/best_config.json"
+    best = json.loads(best_path.read_text(encoding="utf-8"))
+    best["best_score"] = best["best_score"] - 0.1
+    best_path.write_text(json.dumps(best), encoding="utf-8")
+
+    recovery_plan = adapter.build_recovery_plan(goal)
+    recovery = orchestrator.run(recovery_plan, parallel=False)
+    verification = json.loads(
+        (workspace / "artifacts/verification_metrics.json").read_text(encoding="utf-8")
+    )
+    record = recovery.results["verify_best"].tool_records[0]
+
+    assert initial.status == "success"
+    assert recovery.status == "failed"
+    assert record["success"] is False
+    assert record["exit_code"] == 1
+    assert verification["verification_passed"] is False
+    assert verification["verification_delta"] > verification["verification_tolerance"]
+    assert "update_research_report" not in recovery.results
+
+    state = LongHorizonState(
+        run_id="tampered-verification",
+        goal=goal,
+        max_phases=2,
+        max_total_tasks=12,
+        artifacts=[
+            artifact
+            for result in initial.results.values()
+            for artifact in result.artifacts
+        ],
+        evidence_records=[
+            record
+            for result in initial.results.values()
+            for record in result.tool_records
+        ],
+        acceptance_contract=adapter.build_contract(goal).to_dict(),
+    )
+    evaluation = DeterministicGlobalEvaluator(
+        adapter.build_contract(goal), workspace
+    ).evaluate(state, recovery_plan, recovery)
+
+    assert evaluation.completed is False
+    assert "verification_metrics" in evaluation.missing_criteria
+    assert "verification_command" in evaluation.missing_criteria
 
 
 def test_long_horizon_demo_rejects_phase_one_and_completes_phase_two(tmp_path):

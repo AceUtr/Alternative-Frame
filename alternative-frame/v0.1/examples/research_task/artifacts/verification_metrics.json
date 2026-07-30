@@ -26,5 +26,8 @@
     "third_party": []
   },
   "verified_experiment": "nearest_centroid_two_features_v1",
-  "source_best_score": 0.95
+  "source_best_score": 0.95,
+  "verification_tolerance": 1e-09,
+  "verification_delta": 0.0,
+  "verification_passed": true
 }

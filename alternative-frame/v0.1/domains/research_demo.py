@@ -30,7 +30,7 @@ IMPROVED_COMMAND = (
 VERIFICATION_COMMAND = (
     "python verify_best.py --dataset data/dataset.json "
     "--config artifacts/best_config.json "
-    "--output artifacts/verification_metrics.json"
+    "--output artifacts/verification_metrics.json --tolerance 0.000000001"
 )
 REPORT_ARGUMENTS = {
     "baseline_metrics_path": "artifacts/baseline_metrics.json",

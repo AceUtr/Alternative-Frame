@@ -22,7 +22,9 @@ python run_improved.py --dataset data/dataset.json --output artifacts/improved_m
 ```
 
 The Harness compares the two metric files, writes `best_config.json`, and then
-runs `verify_best.py` as an independent command. From the `v0.1` directory,
+runs `verify_best.py` as an independent command. Verification succeeds only
+when the rerun accuracy matches `best_config.best_score` within the explicit
+absolute tolerance of `1e-9`; a mismatch exits non-zero. From the `v0.1` directory,
 `python run_research_demo.py` executes the complete two-phase flow and writes a
 PNG chart plus a Markdown report.
 

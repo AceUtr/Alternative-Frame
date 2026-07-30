@@ -88,11 +88,12 @@ class ResearchReportBuilder(Tool):
             outcome = "improved" if delta > 0 else "tied" if delta == 0 else "regressed"
             verification_status = "pending"
             if verification is not None:
-                verification_status = (
-                    "passed"
-                    if abs(float(verification["accuracy"]) - float(best["best_score"])) < 1e-12
-                    else "failed"
-                )
+                verification_status = "passed" if (
+                    verification.get("verification_passed") is True
+                    and abs(
+                        float(verification["accuracy"]) - float(best["best_score"])
+                    ) <= float(verification["verification_tolerance"])
+                ) else "failed"
             rows = "\n".join(
                 f"| {label} | {score:.6f} |" for label, score in zip(labels, scores)
             )
