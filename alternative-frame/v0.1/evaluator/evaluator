@@ -1,1 +1,33 @@
+import os
 
+
+def evaluate():
+
+    checks = []
+
+
+    # 检查代码文件是否存在
+    checks.append(
+        os.path.exists(
+            "examples/software_task/app.py"
+        )
+    )
+
+
+    # 检查测试文件是否存在
+    checks.append(
+        os.path.exists(
+            "examples/software_task/test_app.py"
+        )
+    )
+
+
+    # 检查报告是否生成
+    checks.append(
+        os.path.exists(
+            "examples/software_task/software_agent_report.md"
+        )
+    )
+
+
+    return all(checks)
