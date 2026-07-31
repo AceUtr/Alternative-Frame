@@ -1,6 +1,7 @@
 import json
 import shutil
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
@@ -9,6 +10,8 @@ from core.acceptance import AcceptanceEvaluator
 from core.domains import DomainRegistry
 from core.long_horizon.contract_validator import ContractValidator
 from core.long_horizon import DeterministicGlobalEvaluator, LongHorizonState
+from core.local_recovery import LocalDAGRecoveryController
+from core.models import Plan
 from core.orchestrator import Orchestrator
 from core.preflight import HarnessPreflightChecker
 from core.tools import ToolRegistry
@@ -319,6 +322,157 @@ def test_tampered_best_score_fails_verification_and_global_contract(tmp_path):
     assert evaluation.completed is False
     assert "verification_metrics" in evaluation.missing_criteria
     assert "verification_command" in evaluation.missing_criteria
+
+
+def test_tied_improved_score_fails_delta_task_and_global_contract(tmp_path):
+    workspace = _workspace(tmp_path)
+    adapter = ResearchDomainAdapter()
+    _, agents = adapter.configure(workspace)
+    orchestrator = Orchestrator(agents, acceptance=AcceptanceEvaluator(workspace))
+    goal = "reject a non-improving candidate"
+
+    initial = orchestrator.run(adapter.build_plan(goal), parallel=False)
+    baseline_path = workspace / "artifacts/baseline_metrics.json"
+    improved = json.loads(
+        (workspace / "artifacts/improved_metrics.json").read_text(encoding="utf-8")
+    )
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline["accuracy"] = improved["accuracy"]
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+
+    report_task = deepcopy(adapter.build_plan(goal).task_map()["build_initial_report"])
+    report_task.depends_on = []
+    report_plan = Plan(
+        goal=goal,
+        subtasks=[report_task],
+        final_acceptance=["comparison_chart", "research_report", "improvement_delta"],
+    )
+    tied_report = orchestrator.run(report_plan, parallel=False)
+    record = tied_report.results["build_initial_report"].tool_records[0]
+
+    assert initial.status == "success"
+    assert tied_report.status == "failed"
+    assert record["success"] is True
+    assert record["metadata"]["metrics"]["improvement_delta"] == 0.0
+    assert any(
+        "improvement_delta" in failure
+        for failure in tied_report.results["build_initial_report"].failures
+    )
+
+    state = LongHorizonState(
+        run_id="tied-improvement",
+        goal=goal,
+        max_phases=2,
+        max_total_tasks=12,
+        artifacts=[
+            artifact
+            for task_id, result in initial.results.items()
+            if task_id != "build_initial_report"
+            for artifact in result.artifacts
+        ],
+        evidence_records=[
+            record
+            for task_id, result in initial.results.items()
+            if task_id != "build_initial_report"
+            for record in result.tool_records
+        ],
+        acceptance_contract=adapter.build_contract(goal).to_dict(),
+    )
+    evaluation = DeterministicGlobalEvaluator(
+        adapter.build_contract(goal), workspace
+    ).evaluate(state, report_plan, tied_report)
+
+    assert evaluation.completed is False
+    assert "improvement_delta" in evaluation.missing_criteria
+
+
+def test_research_task_retries_one_controlled_transient_failure(tmp_path):
+    workspace = _workspace(tmp_path)
+    adapter = ResearchDomainAdapter()
+    _, agents = adapter.configure(workspace)
+    plan = adapter.build_plan("retry one controlled research failure")
+    baseline_task = plan.task_map()["run_baseline"]
+    assert baseline_task.max_retries == 1
+    baseline_task.metadata["fault_injection"] = {
+        "enabled": True,
+        "id": "baseline-retry-once",
+        "fail_attempts": 1,
+    }
+    events = []
+
+    report = Orchestrator(
+        agents,
+        acceptance=AcceptanceEvaluator(workspace),
+        on_event=lambda event, task, result=None: events.append(
+            (event, task.id, task.metadata.get("runtime_attempt"))
+        ),
+    ).run(plan, parallel=False)
+
+    assert report.status == "success"
+    assert report.results["run_baseline"].attempts == 2
+    assert "fault_injection=baseline-retry-once;attempt=1" in report.results[
+        "run_baseline"
+    ].evidence
+    assert ("task_retry_scheduled", "run_baseline", 1) in events
+    metrics = json.loads(
+        (workspace / "artifacts/baseline_metrics.json").read_text(encoding="utf-8")
+    )
+    assert metrics["accuracy"] == 0.8
+
+
+def test_research_local_dag_recovery_freezes_stable_tasks(tmp_path):
+    workspace = _workspace(tmp_path)
+    adapter = ResearchDomainAdapter()
+    _, agents = adapter.configure(workspace)
+    plan = adapter.build_plan("recover an improved experiment failure")
+    improved_task = plan.task_map()["run_improved"]
+    improved_task.max_retries = 0
+    improved_task.metadata["fault_injection"] = {
+        "enabled": True,
+        "id": "improved-local-recovery-once",
+        "fail_attempts": 1,
+    }
+    events = []
+    orchestrator = Orchestrator(
+        agents,
+        acceptance=AcceptanceEvaluator(workspace),
+    )
+    recovery = LocalDAGRecoveryController(
+        orchestrator,
+        max_cycles=1,
+        on_event=lambda event, payload: events.append((event, payload)),
+    )
+
+    outcome = recovery.run(plan, task_budget=12)
+
+    assert outcome.report.status == "success"
+    assert outcome.cycles == 1
+    assert outcome.executed_tasks == 9
+    assert outcome.impacts == [
+        {
+            "failed": ["run_improved"],
+            "blocked": ["build_initial_report", "compare_experiments"],
+            "impacted": [
+                "run_improved",
+                "compare_experiments",
+                "build_initial_report",
+            ],
+            "frozen": [
+                "generate_dataset",
+                "inspect_dataset",
+                "run_baseline",
+            ],
+        }
+    ]
+    planned = next(payload for event, payload in events if event == "local_recovery_planned")
+    assert [task["id"] for task in planned["tasks"]] == [
+        "run_improved",
+        "compare_experiments",
+        "build_initial_report",
+    ]
+    assert outcome.report.results["run_baseline"].attempts == 1
+    assert outcome.report.results["run_improved"].status == "success"
+    assert (workspace / "artifacts/research_report.md").is_file()
 
 
 def test_long_horizon_demo_rejects_phase_one_and_completes_phase_two(tmp_path):

@@ -28,5 +28,9 @@ absolute tolerance of `1e-9`; a mismatch exits non-zero. From the `v0.1` directo
 `python run_research_demo.py` executes the complete two-phase flow and writes a
 PNG chart plus a Markdown report.
 
+The acceptance contract also requires
+`improved_accuracy - baseline_accuracy >= 0.000001`; absolute accuracy
+thresholds alone cannot make a tied or regressed candidate pass.
+
 Delete `data/dataset.json` and `artifacts/` to reset. Re-running the commands
 recreates identical inputs and metrics.

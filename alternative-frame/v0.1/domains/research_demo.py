@@ -49,6 +49,7 @@ class ResearchExecutionAgent(Agent):
         self.role = role
         self.tools = tools
         self.workspace = workspace
+        self._fault_counts: dict[str, int] = {}
 
     def run(
         self,
@@ -56,6 +57,24 @@ class ResearchExecutionAgent(Agent):
         context: Mapping[str, AgentResult],
     ) -> AgentResult:
         started = utc_now()
+        fault = task.metadata.get("fault_injection", {})
+        if isinstance(fault, dict) and fault.get("enabled") is True:
+            fault_id = str(fault.get("id", task.id))
+            fail_attempts = int(fault.get("fail_attempts", 1))
+            self._fault_counts[fault_id] = self._fault_counts.get(fault_id, 0) + 1
+            if self._fault_counts[fault_id] <= fail_attempts:
+                return AgentResult(
+                    subtask_id=task.id,
+                    status="failed",
+                    summary="Deterministic research fault injected before tool execution.",
+                    evidence=[
+                        f"fault_injection={fault_id};"
+                        f"attempt={self._fault_counts[fault_id]}"
+                    ],
+                    failures=["injected transient research failure"],
+                    started_at=started,
+                    finished_at=utc_now(),
+                )
         tool_name = str(task.metadata["execution"]["tool"])
         arguments = dict(task.metadata["execution"]["arguments"])
         result = self.tools.execute(tool_name, arguments)
@@ -182,7 +201,7 @@ class ResearchDomainAdapter(DomainAdapter):
                 role="research_experiment",
                 description="Fit and evaluate the nearest-centroid baseline.",
                 depends_on=["inspect_dataset"],
-                max_retries=0,
+                max_retries=1,
                 metadata={
                     "required_tools": ["experiment_runner"],
                     "expected_outputs": ["artifacts/baseline_metrics.json"],
@@ -215,7 +234,7 @@ class ResearchDomainAdapter(DomainAdapter):
                 role="research_experiment",
                 description="Fit and evaluate the two-feature improved configuration.",
                 depends_on=["inspect_dataset"],
-                max_retries=0,
+                max_retries=1,
                 metadata={
                     "required_tools": ["experiment_runner"],
                     "expected_outputs": ["artifacts/improved_metrics.json"],
@@ -294,8 +313,19 @@ class ResearchDomainAdapter(DomainAdapter):
                             "check_type": "file_exists",
                             "path": "artifacts/research_report.md",
                         },
+                        {
+                            "id": "improvement_delta",
+                            "check_type": "metric",
+                            "metric_name": "improvement_delta",
+                            "threshold": 0.000001,
+                            "mode": "max",
+                        },
                     ],
-                    "contract_criteria": ["comparison_chart", "research_report"],
+                    "contract_criteria": [
+                        "comparison_chart",
+                        "research_report",
+                        "improvement_delta",
+                    ],
                     "execution": {
                         "tool": "research_report_builder",
                         "arguments": dict(REPORT_ARGUMENTS),
@@ -314,6 +344,7 @@ class ResearchDomainAdapter(DomainAdapter):
                 "improved_metrics",
                 "improved_accuracy",
                 "best_config",
+                "improvement_delta",
                 "comparison_chart",
                 "research_report",
             ],
@@ -369,6 +400,13 @@ class ResearchDomainAdapter(DomainAdapter):
                     path="artifacts/best_config.json",
                 ),
                 GoalCriterion(
+                    "improvement_delta",
+                    "Improved accuracy is strictly better than baseline accuracy",
+                    "metric",
+                    metric_name="improvement_delta",
+                    threshold=0.000001,
+                ),
+                GoalCriterion(
                     "verification_metrics",
                     "Best configuration is independently rerun",
                     "file_exists",
@@ -410,7 +448,7 @@ class ResearchDomainAdapter(DomainAdapter):
                     id="verify_best",
                     role="research_experiment",
                     description="Independently rerun the selected best configuration.",
-                    max_retries=0,
+                    max_retries=1,
                     metadata={
                         "required_tools": ["experiment_runner"],
                         "expected_outputs": ["artifacts/verification_metrics.json"],

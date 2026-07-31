@@ -295,10 +295,30 @@ run_baseline       run_candidate
 `best_score` 的绝对差不超过 `1e-9`。不一致时复验文件会记录差值和失败状态，
 命令返回非零退出码，因此精确命令证据与全局合同均不能通过。
 
-这里验证的是现有 `LongHorizonController` 的跨阶段全局验收、重规划和证据补齐，
-不等同于任务级重试或局部 DAG 恢复。当前科研计划中所有任务均为
-`max_retries=0`，尚未注入可控任务故障，也未验证 `LocalDAGRecoveryController`；
-这些能力留待第三阶段实现和测试后再作声明。
+第三阶段增加了机器可验收的 `improvement_delta` 合同条款：
+
+```text
+improvement_delta = improved_accuracy - baseline_accuracy
+improvement_delta >= 0.000001
+```
+
+因此 baseline 和 improved 即使分别达到绝对 accuracy 门槛，只要 improved
+持平或退化，任务验收与全局合同仍会拒绝完成。
+
+科研 Adapter 还提供默认关闭、只能由任务元数据显式开启的确定性故障注入。
+测试分别验证：
+
+- `run_baseline` 设置 `max_retries=1`，第一次注入瞬时失败，第二次真实工具执行成功；
+- `run_improved` 设置 `max_retries=0`，首次失败后由现有
+  `LocalDAGRecoveryController` 重建受影响子图；
+- 局部恢复只重跑 `run_improved -> compare_experiments -> build_initial_report`；
+- `generate_dataset`、`inspect_dataset` 和 `run_baseline` 保持冻结，不重复执行。
+
+上述结论仅覆盖受控、确定性的单次故障。baseline、improved 和独立复验任务采用
+有限的 `max_retries=1`，其他科研任务仍为 `max_retries=0`，正常运行不启用
+故障注入；尚未证明任意外部故障均可恢复。
+跨阶段复验缺口目前仍由确定性规则选择恢复计划，动态科研 Replanner
+和真实模型协作仍属于后续工作。
 
 ## 8. 产物与证据规范
 
