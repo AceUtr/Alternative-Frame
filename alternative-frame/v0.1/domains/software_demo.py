@@ -1,6 +1,7 @@
 from core.models import Plan, SubTask
 
 
+
 def build(goal: str) -> Plan:
 
 
@@ -21,7 +22,7 @@ def build(goal: str) -> Plan:
 
             inputs=[
                 "examples/software_task/requirements.md",
-                "examples/software_task/README.md",
+                "examples/software_task/app.py",
                 "examples/software_task/test_app.py"
             ],
 
@@ -39,7 +40,7 @@ def build(goal: str) -> Plan:
 
 
         # ======================
-        # 2. Architecture
+        # 2. Architecture Design
         # ======================
 
         SubTask(
@@ -85,7 +86,8 @@ def build(goal: str) -> Plan:
             ],
 
             inputs=[
-                "examples/software_task/src/"
+                "examples/software_task/app.py",
+                "examples/software_task/test_app.py"
             ],
 
             acceptance=[
@@ -99,7 +101,6 @@ def build(goal: str) -> Plan:
             }
 
         ),
-
 
 
 
@@ -171,7 +172,7 @@ def build(goal: str) -> Plan:
 
 
         # ======================
-        # 6. Evidence Collector
+        # 6. Evidence Reporter
         # ======================
 
         SubTask(
