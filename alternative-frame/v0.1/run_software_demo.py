@@ -8,6 +8,7 @@ import os
 import subprocess
 from datetime import datetime
 
+
 # ==========================
 # Evidence Storage
 # ==========================
@@ -21,7 +22,14 @@ TEST_OUTPUT = ""
 TEST_EXIT_CODE = None
 
 
+
 def software_handler(task, context):
+
+    global BEFORE_CODE
+    global AFTER_CODE
+    global TEST_OUTPUT
+    global TEST_EXIT_CODE
+
 
     print("\n==============================")
     print("[Agent executing]")
@@ -37,14 +45,16 @@ def software_handler(task, context):
 
 
     # =================================================
-    # 1. Requirement Analyst
+    # 1. Analyst
     # =================================================
 
     if task.role == "analyst":
 
+
         if not os.path.exists(app_file):
 
             return "app.py not found"
+
 
 
         with open(
@@ -56,8 +66,10 @@ def software_handler(task, context):
             code = f.read()
 
 
+
         print("\nCurrent Code:")
         print(code)
+
 
 
         analysis = """
@@ -67,13 +79,16 @@ Requirement Analysis:
 Function:
 add(a,b)
 
+
 Expected behavior:
 Return the sum of two numbers.
+
 
 Detected:
 The current implementation does not satisfy requirement.
 
 """
+
 
         print(analysis)
 
@@ -96,14 +111,18 @@ System Architecture:
 Frontend:
 - User Interface
 
+
 Backend:
 - Application Service
+
 
 Core:
 - Business Logic Module
 
+
 Testing:
 - pytest automation framework
+
 
 
 Data Flow:
@@ -127,36 +146,69 @@ Test Validation
 
 
     # =================================================
-    # 3. Code Reviewer
+    # 3. Reviewer
     # =================================================
 
     elif task.role == "reviewer":
 
 
-        review = """
+        with open(
+            app_file,
+            "r",
+            encoding="utf8"
+        ) as f:
+
+            code = f.read()
+
+
+
+        if "return a-b" in code:
+
+
+            review = """
 
 Code Review Report:
 
-Checked:
-✓ Function structure
 
-✓ Naming convention
+File:
 
-✓ Logic correctness
-
-✓ Test compatibility
+examples/software_task/app.py
 
 
-Found Issues:
+Issue:
 
-1.
-add() function logic error
+Function add() uses incorrect arithmetic operator.
+
+
+
+Current:
+
+return a-b
+
+
+
+Expected:
+
+return a+b
+
 
 
 Recommendation:
 
-- Fix arithmetic operation
-- Add regression tests
+Replace subtraction with addition.
+
+"""
+
+
+        else:
+
+
+            review = """
+
+Code Review Report:
+
+
+No issue found.
 
 """
 
@@ -180,16 +232,19 @@ Recommendation:
             return "Source file missing"
 
 
-        global BEFORE_CODE
+
         with open(
             app_file,
             "r",
             encoding="utf8"
         ) as f:
 
-            code=f.read()
-        
+            code = f.read()
+
+
+
         BEFORE_CODE = code
+
 
 
         print("\nBefore modification:")
@@ -197,7 +252,7 @@ Recommendation:
 
 
 
-        # 修复bug
+        # apply fix
 
         code = code.replace(
             "return a-b",
@@ -213,8 +268,11 @@ Recommendation:
         ) as f:
 
             f.write(code)
-        global AFTER_CODE
+
+
+
         AFTER_CODE = code
+
 
 
         print("\nAfter modification:")
@@ -236,9 +294,11 @@ Recommendation:
         print("Running tests...")
 
 
+
         test_file = (
             f"{project}/test_app.py"
         )
+
 
 
         result = subprocess.run(
@@ -256,26 +316,22 @@ Recommendation:
         )
 
 
-        print("\nPytest Result:")
-
-        print(result.stdout)
-        global TEST_OUTPUT
-        global TEST_EXIT_CODE
-
 
         TEST_OUTPUT = result.stdout
 
         TEST_EXIT_CODE = result.returncode
 
-        
 
-        
+
+        print("\nPytest Result:")
+
+        print(TEST_OUTPUT)
+
 
 
         if result.returncode == 0:
 
             return "All tests passed"
-
 
         else:
 
@@ -295,26 +351,31 @@ Recommendation:
         )
 
 
+
         report_file = (
             f"{project}/software_agent_report.md"
         )
 
 
-        with open(
-            report_file,
-            "w",
-            encoding="utf8"
-        ) as f:
+
+        if TEST_EXIT_CODE == 0:
+
+            test_status = "PASS"
+
+        else:
+
+            test_status = "FAILED"
 
 
-            f.write(
-f"""
+
+        report_content = f"""
 # Software Engineering Agent Report
 
 
 ## Execution Time
 
 {datetime.now()}
+
 
 
 ## Workflow
@@ -331,37 +392,61 @@ f"""
 5. Automated Testing
 
 
+
 ## Agent Result
 
 
 """
 
 
-+
+
+        report_content += "\n".join(
+
+            [
+                f"- {k}: {v.summary}"
+                for k, v in context.items()
+            ]
+
+        )
 
 
-"\n".join(
 
-[
-f"- {k}: {v.summary}"
-for k,v in context.items()
+        report_content += f"""
 
-]
 
-)
+## Code Change
 
-+
 
-"""
+
+### Before
+
+
+{BEFORE_CODE}
+
+
+
+### After
+
+
+{AFTER_CODE}
 
 
 
 ## Testing Evidence
 
 
-pytest:
 
-PASS
+pytest Status:
+
+
+{test_status}
+
+
+
+Output:
+
+
+{TEST_OUTPUT}
 
 
 
@@ -372,7 +457,15 @@ Software issue fixed successfully.
 
 """
 
-            )
+
+
+        with open(
+            report_file,
+            "w",
+            encoding="utf8"
+        ) as f:
+
+            f.write(report_content)
 
 
 
@@ -380,6 +473,7 @@ Software issue fixed successfully.
             "Report saved:",
             report_file
         )
+
 
 
         return (
@@ -390,6 +484,8 @@ Software issue fixed successfully.
 
 
     return "Finished"
+
+
 
 
 
@@ -419,6 +515,7 @@ def main():
 
 
     for role in roles:
+
 
         registry.register(
 
@@ -486,7 +583,7 @@ generate evidence report.
 
 
 
-    for task_id,result in report.results.items():
+    for task_id, result in report.results.items():
 
         print(
 
@@ -497,6 +594,7 @@ generate evidence report.
             result.summary
 
         )
+
 
 
 
