@@ -5,6 +5,9 @@ from core.models import Plan, SubTask
 def build(goal: str) -> Plan:
 
 
+    workspace = "examples/software_task"
+
+
     tasks = [
 
 
@@ -21,9 +24,9 @@ def build(goal: str) -> Plan:
             "读取需求文档，分析业务目标并生成验收条件",
 
             inputs=[
-                "examples/software_task/requirements.md",
-                "examples/software_task/app.py",
-                "examples/software_task/test_app.py"
+                f"{workspace}/requirements.md",
+                f"{workspace}/app.py",
+                f"{workspace}/test_app.py"
             ],
 
             acceptance=[
@@ -31,9 +34,16 @@ def build(goal: str) -> Plan:
                 "明确功能验收条件"
             ],
 
+            max_retries=2,
+
             metadata={
+
                 "domain":
-                "software_engineering"
+                "software_engineering",
+
+                "workspace":
+                workspace
+
             }
         ),
 
@@ -55,58 +65,32 @@ def build(goal: str) -> Plan:
                 "requirements_analysis"
             ],
 
+            inputs=[
+                f"{workspace}/requirements.md"
+            ],
+
             acceptance=[
                 "完成系统结构设计"
             ],
 
+            max_retries=2,
+
             metadata={
+
                 "domain":
-                "software_engineering"
+                "software_engineering",
+
+                "workspace":
+                workspace
+
             }
 
         ),
 
 
 
-
         # ======================
-        # 3. Code Review
-        # ======================
-
-        SubTask(
-            id="code_review",
-
-            role="reviewer",
-
-            description=
-            "检查现有代码，定位缺陷并分析修改方案",
-
-            depends_on=[
-                "architecture_design"
-            ],
-
-            inputs=[
-                "examples/software_task/app.py",
-                "examples/software_task/test_app.py"
-            ],
-
-            acceptance=[
-                "发现代码问题",
-                "提供修复建议"
-            ],
-
-            metadata={
-                "domain":
-                "software_engineering"
-            }
-
-        ),
-
-
-
-
-        # ======================
-        # 4. Developer
+        # 3. Developer Implementation
         # ======================
 
         SubTask(
@@ -115,30 +99,47 @@ def build(goal: str) -> Plan:
             role="developer",
 
             description=
-            "根据代码审查结果修改软件实现",
+            "根据需求分析和架构设计修改软件实现",
 
             depends_on=[
-                "code_review"
+                "architecture_design"
+            ],
+
+            inputs=[
+                f"{workspace}/app.py",
+                f"{workspace}/test_app.py"
             ],
 
             acceptance=[
+
                 "代码修改完成",
+
                 "功能符合需求"
+
             ],
 
+            max_retries=2,
+
             metadata={
+
                 "domain":
-                "software_engineering"
+                "software_engineering",
+
+                "workspace":
+                workspace,
+
+                "expected_outputs":[
+                    f"{workspace}/app.py"
+                ]
+
             }
 
         ),
 
 
 
-
-
         # ======================
-        # 5. Tester
+        # 4. Tester
         # ======================
 
         SubTask(
@@ -153,21 +154,92 @@ def build(goal: str) -> Plan:
                 "implementation"
             ],
 
+            inputs=[
+                f"{workspace}/test_app.py",
+                f"{workspace}/app.py"
+            ],
+
             acceptance=[
                 "所有测试通过"
             ],
 
+            max_retries=2,
+
             metadata={
+
                 "domain":
                 "software_engineering",
 
+                "workspace":
+                workspace,
+
                 "command":
-                "pytest"
+                "pytest",
+
+                "checks":[
+
+                    {
+                        "id":
+                        "tests_pass",
+
+                        "check_type":
+                        "command",
+
+                        "command":
+                        "pytest examples/software_task/test_app.py -v"
+
+                    }
+
+                ]
+
             }
 
         ),
 
 
+
+        # ======================
+        # 5. Final Code Review
+        # ======================
+
+        SubTask(
+            id="code_review",
+
+            role="reviewer",
+
+            description=
+            "检查修改后的代码和测试结果，完成最终质量审查",
+
+            depends_on=[
+                "testing"
+            ],
+
+            inputs=[
+                f"{workspace}/app.py",
+                f"{workspace}/test_app.py"
+            ],
+
+            acceptance=[
+
+                "确认代码满足需求",
+
+                "确认测试结果通过"
+
+            ],
+
+            max_retries=2,
+
+            metadata={
+
+                "domain":
+                "software_engineering",
+
+                "workspace":
+                workspace
+
+            }
+
+        ),
 
 
 
@@ -184,17 +256,27 @@ def build(goal: str) -> Plan:
             "收集代码修改记录、测试结果和运行证据",
 
             depends_on=[
-                "testing"
+                "code_review"
             ],
 
             acceptance=[
+
                 "生成完整运行报告",
+
                 "保存测试日志"
+
             ],
 
+            max_retries=1,
+
             metadata={
+
                 "domain":
-                "software_engineering"
+                "software_engineering",
+
+                "workspace":
+                workspace
+
             }
 
         )
@@ -217,6 +299,8 @@ def build(goal: str) -> Plan:
             "代码问题修复",
 
             "自动化测试通过",
+
+            "代码最终审查完成",
 
             "生成运行证据"
 
