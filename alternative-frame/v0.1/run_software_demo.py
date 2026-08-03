@@ -3,6 +3,7 @@ from core.agents import AgentRegistry, DeterministicAgent
 from core.orchestrator import Orchestrator
 from domains.software_demo import build
 from evaluation.evaluator import evaluate
+from core.acceptance import AcceptanceEvaluator
 
 import os
 import subprocess
@@ -152,72 +153,86 @@ Test Validation
     elif task.role == "reviewer":
 
 
-        with open(
-            app_file,
-            "r",
-            encoding="utf8"
-        ) as f:
+    with open(
+        app_file,
+        "r",
+        encoding="utf8"
+    ) as f:
 
-            code = f.read()
-
-
-
-        if "return a-b" in code:
+        code = f.read()
 
 
-            review = """
+
+    requirement_result = context.get(
+        "requirements_analysis"
+    )
+
+
+    requirement_text = ""
+
+
+    if requirement_result:
+
+        requirement_text = requirement_result.summary
+
+
+
+    print("\nReviewer received context:")
+
+    print(requirement_text)
+
+
+
+    if (
+        "return b-a" in code
+        or
+        "return a-b" in code
+    ):
+
+
+        review = """
 
 Code Review Report:
 
 
-File:
-
-examples/software_task/app.py
-
-
 Issue:
 
-Function add() uses incorrect arithmetic operator.
+Function add() contains incorrect arithmetic logic.
 
 
+Current implementation:
 
-Current:
-
-return a-b
-
-
+{}
 
 Expected:
 
 return a+b
 
 
-
 Recommendation:
 
 Replace subtraction with addition.
 
-"""
+""".format(code)
 
 
-        else:
+    else:
 
 
-            review = """
+        review = """
 
 Code Review Report:
 
-
-No issue found.
+No obvious issue found.
 
 """
 
 
-        print(review)
+
+    print(review)
 
 
-        return review
-
+    return review
 
 
     # =================================================
@@ -254,10 +269,31 @@ No issue found.
 
         # apply fix
 
-        code = code.replace(
-            "return a-b",
-            "return a+b"
-        )
+        review_result = context.get(
+    "code_review"
+)
+
+
+if review_result:
+
+    print("\nDeveloper received review:")
+
+    print(
+        review_result.summary
+    )
+
+
+
+code = code.replace(
+    "return a-b",
+    "return a+b"
+)
+
+
+code = code.replace(
+    "return b-a",
+    "return a+b"
+)
 
 
 
