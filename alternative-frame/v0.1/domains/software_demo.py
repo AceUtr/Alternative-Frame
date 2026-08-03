@@ -154,6 +154,7 @@ def build(goal: str) -> Plan:
                 "implementation"
             ],
 
+            max_retries=0,
             inputs=[
                 f"{workspace}/test_app.py",
                 f"{workspace}/app.py"
@@ -214,6 +215,8 @@ def build(goal: str) -> Plan:
                 "testing"
             ],
 
+            max_retries=0,
+
             inputs=[
                 f"{workspace}/app.py",
                 f"{workspace}/test_app.py"
@@ -259,6 +262,7 @@ def build(goal: str) -> Plan:
                 "code_review"
             ],
 
+            max_retries=0,
             acceptance=[
 
                 "生成完整运行报告",
