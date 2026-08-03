@@ -316,7 +316,19 @@ code = code.replace(
 
 
 
-        return "Developer fixed source code"
+        return AgentResult(
+
+    subtask_id=task.id,
+
+    status="success",
+
+    summary="Developer fixed source code",
+
+    artifacts=[
+        "examples/software_task/app.py"
+    ]
+
+)
 
 
 
@@ -367,7 +379,20 @@ code = code.replace(
 
         if result.returncode == 0:
 
-            return "All tests passed"
+            from core.models import AgentResult
+            return AgentResult(
+
+    subtask_id=task.id,
+
+    status="success",
+
+    summary="All tests passed",
+
+    evidence=[
+        f"pytest_exit_code={TEST_EXIT_CODE}"
+    ]
+
+    )
 
         else:
 
