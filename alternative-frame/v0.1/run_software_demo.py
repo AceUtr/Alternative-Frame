@@ -531,11 +531,13 @@ def main():
 
 
 
-    orchestrator = Orchestrator(
+    from core.acceptance import AcceptanceEvaluator
 
-        registry=registry
 
-    )
+orchestrator = Orchestrator(
+    registry=registry,
+    acceptance=AcceptanceEvaluator()
+)
 
 
 
