@@ -2,7 +2,7 @@ from core.main_agent import MainAgent
 from core.agents import AgentRegistry, DeterministicAgent
 from core.orchestrator import Orchestrator
 from domains.software_demo import build
-from evaluation.evaluator import evaluate
+from evaluator.evaluator import evaluate
 from core.acceptance import AcceptanceEvaluator
 
 import os
