@@ -493,6 +493,89 @@ def test_long_horizon_demo_rejects_phase_one_and_completes_phase_two(tmp_path):
     assert len(persisted["phases"]) == 2
 
 
+def test_run_demo_task_retry_repairs_command_from_feedback(tmp_path):
+    workspace = _workspace(tmp_path)
+    runs = tmp_path / "runs"
+
+    report = run_demo(
+        workspace,
+        runs,
+        "research-task-retry",
+        fault_scenario="task-retry",
+    )
+
+    assert report.status == "completed"
+    assert report.state.phase == 2
+    assert all(phase.local_recovery_cycles == 0 for phase in report.state.phases)
+    baseline = report.phase_reports[0].results["run_baseline"]
+    assert baseline.attempts == 2
+    assert len(baseline.tool_records) == 2
+    assert baseline.tool_records[0]["arguments"]["command"].endswith(
+        "--output artifacts/fault_baseline_metrics.json"
+    )
+    assert baseline.tool_records[0]["success"] is False
+    assert baseline.tool_records[1]["arguments"]["command"].endswith(
+        "--output artifacts/baseline_metrics.json"
+    )
+    assert baseline.tool_records[1]["success"] is True
+    assert "retry_feedback_applied=missing_artifact" in baseline.evidence
+    assert "retry_artifact_removed=artifacts/fault_baseline_metrics.json" in baseline.evidence
+    assert not (workspace / "artifacts/fault_baseline_metrics.json").exists()
+    events = [
+        json.loads(line)
+        for line in (runs / "research-task-retry/events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    retry_event = next(
+        event for event in events if event["event"] == "task_retry_scheduled"
+    )
+    assert retry_event["payload"]["task_id"] == "run_baseline"
+    assert retry_event["payload"]["attempt"] == 1
+
+
+def test_run_demo_local_recovery_rebuilds_impacted_research_subgraph(tmp_path):
+    workspace = _workspace(tmp_path)
+    runs = tmp_path / "runs"
+
+    report = run_demo(
+        workspace,
+        runs,
+        "research-local-recovery",
+        fault_scenario="local-recovery",
+    )
+
+    assert report.status == "completed"
+    assert report.state.phase == 2
+    assert report.state.phases[0].local_recovery_cycles == 1
+    assert report.state.phases[0].executed_task_count == 9
+    assert report.state.phases[1].local_recovery_cycles == 0
+    events = [
+        json.loads(line)
+        for line in (runs / "research-local-recovery/events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    planned = next(event for event in events if event["event"] == "local_recovery_planned")
+    assert [task["id"] for task in planned["payload"]["tasks"]] == [
+        "run_improved",
+        "compare_experiments",
+        "build_initial_report",
+    ]
+    assert any(event["event"] == "local_recovery_finished" for event in events)
+
+
+def test_run_demo_rejects_unknown_fault_scenario(tmp_path):
+    workspace = _workspace(tmp_path)
+
+    try:
+        run_demo(workspace, tmp_path / "runs", "invalid", fault_scenario="unknown")
+    except ValueError as exc:
+        assert "unsupported fault scenario" in str(exc)
+    else:
+        raise AssertionError("unknown fault scenario must be rejected")
+
+
 def test_metric_comparator_rejects_workspace_escape(tmp_path):
     result = MetricComparator(tmp_path).execute(
         {

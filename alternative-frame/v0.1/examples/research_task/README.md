@@ -32,5 +32,18 @@ The acceptance contract also requires
 `improved_accuracy - baseline_accuracy >= 0.000001`; absolute accuracy
 thresholds alone cannot make a tied or regressed candidate pass.
 
+The formal entry point supports deterministic recovery demonstrations:
+
+```powershell
+python run_research_demo.py --fault-scenario normal
+python run_research_demo.py --fault-scenario task-retry
+python run_research_demo.py --fault-scenario local-recovery
+```
+
+`task-retry` repairs an incorrect output command and removes its bad artifact
+after reading structured retry feedback. `local-recovery` uses the existing
+`LocalDAGRecoveryController` to rerun only the failed improved-experiment
+subgraph. Both scenarios persist auditable events under `runs/research/`.
+
 Delete `data/dataset.json` and `artifacts/` to reset. Re-running the commands
 recreates identical inputs and metrics.

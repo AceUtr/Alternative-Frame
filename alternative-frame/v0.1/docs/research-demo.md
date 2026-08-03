@@ -320,6 +320,28 @@ improvement_delta >= 0.000001
 跨阶段复验缺口目前仍由确定性规则选择恢复计划，动态科研 Replanner
 和真实模型协作仍属于后续工作。
 
+### 7.1 正式入口中的恢复场景
+
+`run_research_demo.py` 已正式接入现有 `LocalDAGRecoveryController`，不创建第二套
+恢复控制器。命令行通过 `--fault-scenario` 选择三个确定性场景：
+
+```powershell
+python run_research_demo.py --fault-scenario normal
+python run_research_demo.py --fault-scenario task-retry
+python run_research_demo.py --fault-scenario local-recovery
+```
+
+- `normal`：不注入故障，局部恢复周期为 0；
+- `task-retry`：baseline 首次真实命令写入错误产物路径，验收产生
+  `missing_artifact` 类型的 `retry_feedback`；Agent 随后清理错误产物、
+  将命令参数修回合同路径并重新执行；
+- `local-recovery`：improved 首次注入瞬时失败且该任务本轮
+  `max_retries=0`，由局部恢复控制器冻结稳定节点并重建受影响子图。
+
+任务开始、结束、重试安排、局部恢复计划和恢复结果均写入对应 run 目录的
+`events.jsonl`。状态与阶段级 `local_recovery_cycles`、`executed_task_count`
+写入 `state.json`，可供后续 UI 展示和现场审计。
+
 ## 8. 产物与证据规范
 
 建议的任务工作区产物：

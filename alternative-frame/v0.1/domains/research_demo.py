@@ -58,18 +58,23 @@ class ResearchExecutionAgent(Agent):
     ) -> AgentResult:
         started = utc_now()
         fault = task.metadata.get("fault_injection", {})
+        fault_count = 0
         if isinstance(fault, dict) and fault.get("enabled") is True:
             fault_id = str(fault.get("id", task.id))
             fail_attempts = int(fault.get("fail_attempts", 1))
             self._fault_counts[fault_id] = self._fault_counts.get(fault_id, 0) + 1
-            if self._fault_counts[fault_id] <= fail_attempts:
+            fault_count = self._fault_counts[fault_id]
+            if (
+                fault.get("mode", "transient_failure") == "transient_failure"
+                and fault_count <= fail_attempts
+            ):
                 return AgentResult(
                     subtask_id=task.id,
                     status="failed",
                     summary="Deterministic research fault injected before tool execution.",
                     evidence=[
                         f"fault_injection={fault_id};"
-                        f"attempt={self._fault_counts[fault_id]}"
+                        f"attempt={fault_count}"
                     ],
                     failures=["injected transient research failure"],
                     started_at=started,
@@ -77,6 +82,37 @@ class ResearchExecutionAgent(Agent):
                 )
         tool_name = str(task.metadata["execution"]["tool"])
         arguments = dict(task.metadata["execution"]["arguments"])
+        evidence = []
+        if (
+            isinstance(fault, dict)
+            and fault.get("enabled") is True
+            and fault.get("mode") == "argument_override"
+            and fault_count <= int(fault.get("fail_attempts", 1))
+        ):
+            arguments.update(dict(fault.get("argument_overrides", {})))
+            evidence.append(f"fault_argument_override=attempt:{fault_count}")
+        retry_feedback = task.metadata.get("retry_feedback")
+        repair = task.metadata.get("retry_repair", {})
+        if isinstance(retry_feedback, dict) and isinstance(repair, dict):
+            expected_category = repair.get("feedback_category")
+            if expected_category in (None, retry_feedback.get("category")):
+                for value in repair.get("cleanup_paths", []):
+                    relative = Path(str(value))
+                    if relative.is_absolute() or ".." in relative.parts:
+                        raise ValueError(f"retry cleanup path escapes workspace: {value}")
+                    target = (self.workspace / relative).resolve()
+                    if target != self.workspace and self.workspace not in target.parents:
+                        raise ValueError(f"retry cleanup path escapes workspace: {value}")
+                    if target.is_file():
+                        target.unlink()
+                        evidence.append(
+                            f"retry_artifact_removed={relative.as_posix()}"
+                        )
+                arguments.update(dict(repair.get("arguments", {})))
+                evidence.append(
+                    "retry_feedback_applied="
+                    f"{retry_feedback.get('category', 'unknown')}"
+                )
         result = self.tools.execute(tool_name, arguments)
         expected_outputs = list(task.metadata.get("expected_outputs", []))
         missing_outputs = [
@@ -102,7 +138,7 @@ class ResearchExecutionAgent(Agent):
             status="success" if result.success else "failed",
             summary=f"{task.description} {result.output or result.error}".strip(),
             artifacts=artifacts,
-            evidence=[f"tool={result.tool};success={result.success}"],
+            evidence=evidence + [f"tool={result.tool};success={result.success}"],
             tool_records=[record],
             failures=[] if result.success else [result.error],
             started_at=started,
