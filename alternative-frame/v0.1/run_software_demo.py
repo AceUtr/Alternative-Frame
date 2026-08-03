@@ -219,11 +219,11 @@ No bug detected.
             encoding="utf8"
         ) as f:
 
-            code=f.read()
+            code = f.read()
 
 
 
-        BEFORE_CODE=code
+        BEFORE_CODE = code
 
 
         print("\nBefore:")
@@ -231,16 +231,94 @@ No bug detected.
 
 
 
-        code=code.replace(
-            "return a-b",
-            "return a+b"
+        # ==========================
+        # Retry Information
+        # ==========================
+
+        attempt = task.metadata.get(
+            "runtime_attempt",
+            1
         )
 
 
-        code=code.replace(
-            "return b-a",
-            "return a+b"
+        retry_feedback = task.metadata.get(
+            "retry_feedback"
         )
+
+
+        print(
+            "\nDeveloper attempt:",
+            attempt
+        )
+
+
+        if retry_feedback:
+
+            print(
+                "\nRetry feedback:"
+            )
+
+            print(
+                retry_feedback
+            )
+
+
+
+        # ==========================
+        # First attempt:
+        # simulate imperfect fix
+        # ==========================
+
+        if attempt == 1:
+
+
+            code = code.replace(
+                "return a-b",
+                "return a*b"
+            )
+
+
+            code = code.replace(
+                "return b-a",
+                "return a*b"
+            )
+
+
+            print(
+                "\nFirst attempt generated a wrong implementation."
+            )
+
+
+
+        # ==========================
+        # Retry attempt:
+        # fix according to feedback
+        # ==========================
+
+        else:
+
+
+            code = code.replace(
+                "return a-b",
+                "return a+b"
+            )
+
+
+            code = code.replace(
+                "return b-a",
+                "return a+b"
+            )
+
+
+            code = code.replace(
+                "return a*b",
+                "return a+b"
+            )
+
+
+            print(
+                "\nRetry attempt fixed implementation."
+            )
 
 
 
@@ -254,8 +332,7 @@ No bug detected.
 
 
 
-        AFTER_CODE=code
-
+            AFTER_CODE = code
 
 
         print("\nAfter:")
@@ -263,16 +340,171 @@ No bug detected.
 
 
 
-        return AgentResult(
-            subtask_id=task.id,
-            status="success",
-            summary="Source code fixed",
-            artifacts=[
-                APP_FILE
-            ]
+        # ==========================
+        # Run verification test
+        # ==========================
+
+        print("\nDeveloper running verification test...")
+
+
+        test_result = subprocess.run(
+
+            [
+                "pytest",
+                f"{PROJECT}/test_app.py",
+                "-v"
+            ],
+
+            capture_output=True,
+
+            text=True
+
         )
 
 
+        test_output = test_result.stdout + test_result.stderr
+
+
+        print(test_output)
+
+
+
+        test_success = (
+            test_result.returncode == 0
+        )
+
+
+
+        # ==========================
+        # Return real evidence
+        # ==========================
+
+        if test_success:
+
+
+            return AgentResult(
+
+                subtask_id=task.id,
+
+                status="success",
+
+                summary=
+                "Source code modified and verified",
+
+                artifacts=[
+
+                    APP_FILE
+
+                ],
+
+                evidence=[
+
+                    "developer_completed",
+
+                    "implementation_test_passed"
+
+                ],
+
+                tool_records=[
+
+                    {
+
+                        "tool":"test_runner",
+
+                        "arguments":{
+
+                            "command":
+                            "pytest examples/software_task/test_app.py -v"
+
+                        },
+
+                        "success":True,
+
+                        "exit_code":
+                        test_result.returncode,
+
+                        "metadata":{
+
+                            "artifacts":[
+
+                                APP_FILE
+
+                            ]
+
+                        }
+
+                    }
+
+                ]
+
+            )
+
+
+        else:
+
+
+            return AgentResult(
+
+                subtask_id=task.id,
+
+                status="failed",
+
+                summary=
+                "Source code modified but verification failed",
+
+                artifacts=[
+
+                    APP_FILE
+
+                ],
+
+                evidence=[
+
+                    "developer_completed",
+
+                    "implementation_test_failed"
+
+                ],
+
+                failures=[
+
+                    test_output
+
+                ],
+
+                tool_records=[
+
+                    {
+
+                        "tool":"test_runner",
+
+                        "arguments":{
+
+                            "command":
+                            "pytest examples/software_task/test_app.py -v"
+
+                        },
+
+                        "success":False,
+
+                        "exit_code":
+                        test_result.returncode,
+
+                        "metadata":{
+
+                            "artifacts":[
+
+                                APP_FILE
+
+                            ]
+
+                        }
+
+                    }
+
+                ]
+
+            )
 
     # =====================================
     # Tester
