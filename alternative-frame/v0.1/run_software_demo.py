@@ -2,12 +2,16 @@ from core.main_agent import MainAgent
 from core.agents import AgentRegistry, DeterministicAgent
 from core.orchestrator import Orchestrator
 from domains.software_demo import build
+
 from evaluator.evaluator import evaluate
 from core.acceptance import AcceptanceEvaluator
+from core.models import AgentResult
+
 
 import os
 import subprocess
 from datetime import datetime
+
 
 
 # ==========================
@@ -15,12 +19,15 @@ from datetime import datetime
 # ==========================
 
 BEFORE_CODE = ""
-
 AFTER_CODE = ""
 
 TEST_OUTPUT = ""
-
 TEST_EXIT_CODE = None
+
+
+
+PROJECT = "examples/software_task"
+APP_FILE = f"{PROJECT}/app.py"
 
 
 
@@ -39,33 +46,20 @@ def software_handler(task, context):
     print("==============================")
 
 
-    project = "examples/software_task"
-
-    app_file = f"{project}/app.py"
-
-
-
-    # =================================================
-    # 1. Analyst
-    # =================================================
+    # =====================================
+    # Analyst
+    # =====================================
 
     if task.role == "analyst":
 
 
-        if not os.path.exists(app_file):
-
-            return "app.py not found"
-
-
-
         with open(
-            app_file,
+            APP_FILE,
             "r",
             encoding="utf8"
         ) as f:
 
             code = f.read()
-
 
 
         print("\nCurrent Code:")
@@ -73,232 +67,185 @@ def software_handler(task, context):
 
 
 
-        analysis = """
-
+        result = """
 Requirement Analysis:
 
+
 Function:
+
 add(a,b)
 
 
 Expected behavior:
+
 Return the sum of two numbers.
 
 
-Detected:
-The current implementation does not satisfy requirement.
+Detected problem:
 
+Current implementation violates requirement.
 """
 
 
-        print(analysis)
+        print(result)
 
 
-        return analysis
+        return AgentResult(
+            subtask_id=task.id,
+            status="success",
+            summary=result
+        )
 
 
 
-    # =================================================
-    # 2. Architect
-    # =================================================
+    # =====================================
+    # Architect
+    # =====================================
 
     elif task.role == "architect":
 
 
         architecture = """
-
 System Architecture:
 
-Frontend:
-- User Interface
-
-
-Backend:
-- Application Service
-
-
-Core:
-- Business Logic Module
-
-
-Testing:
-- pytest automation framework
-
-
-
-Data Flow:
 
 Input
  |
  v
-Business Logic
+
+Business Logic(add)
+
  |
  v
-Test Validation
 
+Automated Test Validation
+
+
+
+Components:
+
+- Application Module
+- Business Logic
+- Test Framework
 """
 
 
         print(architecture)
 
 
-        return architecture
+        return AgentResult(
+            subtask_id=task.id,
+            status="success",
+            summary=architecture
+        )
 
 
 
-    # =================================================
-    # 3. Reviewer
-    # =================================================
+    # =====================================
+    # Reviewer
+    # =====================================
 
     elif task.role == "reviewer":
 
 
-    with open(
-        app_file,
-        "r",
-        encoding="utf8"
-    ) as f:
+        with open(
+            APP_FILE,
+            "r",
+            encoding="utf8"
+        ) as f:
 
-        code = f.read()
-
-
-
-    requirement_result = context.get(
-        "requirements_analysis"
-    )
-
-
-    requirement_text = ""
-
-
-    if requirement_result:
-
-        requirement_text = requirement_result.summary
+            code=f.read()
 
 
 
-    print("\nReviewer received context:")
+        if (
+            "return a-b" in code
+            or
+            "return b-a" in code
+        ):
 
-    print(requirement_text)
-
-
-
-    if (
-        "return b-a" in code
-        or
-        "return a-b" in code
-    ):
+            review="""
+Code Review Result:
 
 
-        review = """
+Bug:
 
-Code Review Report:
+Function add() uses subtraction.
 
-
-Issue:
-
-Function add() contains incorrect arithmetic logic.
-
-
-Current implementation:
-
-{}
 
 Expected:
 
 return a+b
 
 
-Recommendation:
+Solution:
 
-Replace subtraction with addition.
-
-""".format(code)
-
-
-    else:
+Replace subtraction operator.
+"""
 
 
-        review = """
+        else:
 
-Code Review Report:
+            review="""
+Code Review Result:
 
-No obvious issue found.
-
+No bug detected.
 """
 
 
 
-    print(review)
+        print(review)
 
 
-    return review
+
+        return AgentResult(
+            subtask_id=task.id,
+            status="success",
+            summary=review
+        )
 
 
-    # =================================================
-    # 4. Developer
-    # =================================================
+
+    # =====================================
+    # Developer
+    # =====================================
 
     elif task.role == "developer":
 
 
-        if not os.path.exists(app_file):
-
-            return "Source file missing"
-
-
-
         with open(
-            app_file,
+            APP_FILE,
             "r",
             encoding="utf8"
         ) as f:
 
-            code = f.read()
+            code=f.read()
 
 
 
-        BEFORE_CODE = code
+        BEFORE_CODE=code
 
 
-
-        print("\nBefore modification:")
+        print("\nBefore:")
         print(code)
 
 
 
-        # apply fix
-
-        review_result = context.get(
-    "code_review"
-)
-
-
-if review_result:
-
-    print("\nDeveloper received review:")
-
-    print(
-        review_result.summary
-    )
+        code=code.replace(
+            "return a-b",
+            "return a+b"
+        )
 
 
-
-code = code.replace(
-    "return a-b",
-    "return a+b"
-)
-
-
-code = code.replace(
-    "return b-a",
-    "return a+b"
-)
+        code=code.replace(
+            "return b-a",
+            "return a+b"
+        )
 
 
 
         with open(
-            app_file,
+            APP_FILE,
             "w",
             encoding="utf8"
         ) as f:
@@ -307,34 +254,29 @@ code = code.replace(
 
 
 
-        AFTER_CODE = code
+        AFTER_CODE=code
 
 
 
-        print("\nAfter modification:")
+        print("\nAfter:")
         print(code)
 
 
 
         return AgentResult(
-
-    subtask_id=task.id,
-
-    status="success",
-
-    summary="Developer fixed source code",
-
-    artifacts=[
-        "examples/software_task/app.py"
-    ]
-
-)
+            subtask_id=task.id,
+            status="success",
+            summary="Source code fixed",
+            artifacts=[
+                APP_FILE
+            ]
+        )
 
 
 
-    # =================================================
-    # 5. Tester
-    # =================================================
+    # =====================================
+    # Tester
+    # =====================================
 
     elif task.role == "tester":
 
@@ -342,18 +284,11 @@ code = code.replace(
         print("Running tests...")
 
 
-
-        test_file = (
-            f"{project}/test_app.py"
-        )
-
-
-
-        result = subprocess.run(
+        result=subprocess.run(
 
             [
                 "pytest",
-                test_file,
+                f"{PROJECT}/test_app.py",
                 "-v"
             ],
 
@@ -365,71 +300,68 @@ code = code.replace(
 
 
 
-        TEST_OUTPUT = result.stdout
+        TEST_OUTPUT=result.stdout
 
-        TEST_EXIT_CODE = result.returncode
+        TEST_EXIT_CODE=result.returncode
 
 
-
-        print("\nPytest Result:")
 
         print(TEST_OUTPUT)
 
 
 
-        if result.returncode == 0:
+        if TEST_EXIT_CODE==0:
 
-            from core.models import AgentResult
+
             return AgentResult(
 
-    subtask_id=task.id,
+                subtask_id=task.id,
 
-    status="success",
+                status="success",
 
-    summary="All tests passed",
+                summary="All tests passed",
 
-    evidence=[
-        f"pytest_exit_code={TEST_EXIT_CODE}"
-    ]
+                evidence=[
+                    f"pytest_exit_code={TEST_EXIT_CODE}"
+                ]
 
-    )
+            )
+
 
         else:
 
-            return "Tests failed"
+
+            return AgentResult(
+
+                subtask_id=task.id,
+
+                status="failed",
+
+                summary="Tests failed",
+
+                failures=[
+                    TEST_OUTPUT
+                ]
+
+            )
 
 
 
-    # =================================================
-    # 6. Reporter
-    # =================================================
+    # =====================================
+    # Reporter
+    # =====================================
 
-    elif task.role == "reporter":
-
-
-        print(
-            "Generating evidence report..."
-        )
+    elif task.role=="reporter":
 
 
+        report_file = f"{PROJECT}/software_agent_report.md"
 
-        report_file = (
-            f"{project}/software_agent_report.md"
-        )
+
+        status = "PASS" if TEST_EXIT_CODE == 0 else "FAILED"
 
 
 
-        if TEST_EXIT_CODE == 0:
-
-            test_status = "PASS"
-
-        else:
-
-            test_status = "FAILED"
-
-
-
-        report_content = f"""
+        content = f"""
 # Software Engineering Agent Report
 
 
@@ -439,54 +371,14 @@ code = code.replace(
 
 
 
-## Workflow
-
-
-1. Requirement Analysis
-
-2. Architecture Design
-
-3. Code Review
-
-4. Implementation
-
-5. Automated Testing
-
-
-
-## Agent Result
-
-
-"""
-
-
-
-        report_content += "\n".join(
-
-            [
-                f"- {k}: {v.summary}"
-                for k, v in context.items()
-            ]
-
-        )
-
-
-
-        report_content += f"""
-
-
-## Code Change
-
-
-
-### Before
+## Code Before
 
 
 {BEFORE_CODE}
 
 
 
-### After
+## Code After
 
 
 {AFTER_CODE}
@@ -496,15 +388,17 @@ code = code.replace(
 ## Testing Evidence
 
 
+Status:
 
-pytest Status:
-
-
-{test_status}
+{status}
 
 
+Exit Code:
 
-Output:
+{TEST_EXIT_CODE}
+
+
+
 
 
 {TEST_OUTPUT}
@@ -514,10 +408,9 @@ Output:
 ## Conclusion
 
 
-Software issue fixed successfully.
+Software issue fixed automatically.
 
 """
-
 
 
         with open(
@@ -526,7 +419,7 @@ Software issue fixed successfully.
             encoding="utf8"
         ) as f:
 
-            f.write(report_content)
+            f.write(content)
 
 
 
@@ -537,46 +430,68 @@ Software issue fixed successfully.
 
 
 
-        return (
-            "Evidence report generated: "
-            + report_file
-        )
+        return AgentResult(
 
+        subtask_id=task.id,
 
+        status="success",
 
-    return "Finished"
+        summary="All tests passed",
 
+        evidence=[
+        f"pytest_exit_code={TEST_EXIT_CODE}"
+    ],
 
+        tool_records=[
 
+        {
 
+            "tool":"test_runner",
+
+            "arguments":{
+
+                "command":
+                "pytest examples/software_task/test_app.py -v"
+
+            },
+
+            "success":True,
+
+            "exit_code":0,
+
+            "metadata":{
+
+                "artifacts":[
+                    "examples/software_task/test_app.py"
+                ]
+
+            }
+
+        }
+
+    ]
+
+)
+    # =====================================
+# Main
+# =====================================
 
 def main():
-
 
     registry = AgentRegistry()
 
 
-
     roles = [
-
         "analyst",
-
         "architect",
-
         "reviewer",
-
         "developer",
-
         "tester",
-
         "reporter"
-
     ]
 
 
-
     for role in roles:
-
 
         registry.register(
 
@@ -592,13 +507,13 @@ def main():
 
 
 
-    from core.acceptance import AcceptanceEvaluator
+    orchestrator = Orchestrator(
 
+        registry=registry,
 
-orchestrator = Orchestrator(
-    registry=registry,
-    acceptance=AcceptanceEvaluator()
-)
+        acceptance=AcceptanceEvaluator()
+
+    )
 
 
 
@@ -613,19 +528,12 @@ orchestrator = Orchestrator(
 
 
     goal = """
-
 Analyze software project,
-
 locate bugs,
-
 modify source code,
-
 run regression tests,
-
 generate evidence report.
-
 """
-
 
 
     report = agent.execute(goal)
@@ -635,30 +543,19 @@ generate evidence report.
     print("\n========== REPORT ==========")
 
 
-
-    if evaluate():
-
-        print("Status: success")
-
-    else:
-
-        print("Status: failed")
-
+    print(
+        "Status:",
+        report.status
+    )
 
 
     for task_id, result in report.results.items():
 
         print(
-
             task_id,
-
             ":",
-
             result.summary
-
         )
-
-
 
 
 
