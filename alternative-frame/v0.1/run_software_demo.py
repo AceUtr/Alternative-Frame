@@ -284,7 +284,7 @@ No bug detected.
         print("Running tests...")
 
 
-        result=subprocess.run(
+        result = subprocess.run(
 
             [
                 "pytest",
@@ -299,18 +299,16 @@ No bug detected.
         )
 
 
+        TEST_OUTPUT = result.stdout
 
-        TEST_OUTPUT=result.stdout
-
-        TEST_EXIT_CODE=result.returncode
-
+        TEST_EXIT_CODE = result.returncode
 
 
         print(TEST_OUTPUT)
 
 
 
-        if TEST_EXIT_CODE==0:
+        if TEST_EXIT_CODE == 0:
 
 
             return AgentResult(
@@ -323,6 +321,37 @@ No bug detected.
 
                 evidence=[
                     f"pytest_exit_code={TEST_EXIT_CODE}"
+                ],
+
+                tool_records=[
+
+                    {
+
+                        "tool": "test_runner",
+
+                        "arguments": {
+
+                            "command":
+                            "pytest examples/software_task/test_app.py -v"
+
+                        },
+
+                        "success": True,
+
+                        "exit_code": 0,
+
+                        "metadata": {
+
+                            "artifacts": [
+
+                                "examples/software_task/test_app.py"
+
+                            ]
+
+                        }
+
+                    }
+
                 ]
 
             )
@@ -340,12 +369,49 @@ No bug detected.
                 summary="Tests failed",
 
                 failures=[
+
                     TEST_OUTPUT
+
+                ],
+
+                evidence=[
+
+                    f"pytest_exit_code={TEST_EXIT_CODE}"
+
+                ],
+
+                tool_records=[
+
+                    {
+
+                        "tool": "test_runner",
+
+                        "arguments": {
+
+                            "command":
+                            "pytest examples/software_task/test_app.py -v"
+
+                        },
+
+                        "success": False,
+
+                        "exit_code": TEST_EXIT_CODE,
+
+                        "metadata": {
+
+                            "artifacts": [
+
+                                "examples/software_task/test_app.py"
+
+                            ]
+
+                        }
+
+                    }
+
                 ]
 
             )
-
-
 
     # =====================================
     # Reporter
