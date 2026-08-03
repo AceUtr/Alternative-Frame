@@ -1,6 +1,9 @@
 from core.models import Plan, SubTask
+from core.domains import DomainAdapter
 
-
+from core.tools.file_editor import FileEditor
+from core.tools.shell_runner import ShellRunner
+from core.tools.test_runner import TestRunner
 
 def build(goal: str) -> Plan:
 
@@ -93,7 +96,8 @@ def build(goal: str) -> Plan:
         # 3. Developer Implementation
         # ======================
 
-        SubTask(
+                SubTask(
+
             id="implementation",
 
             role="developer",
@@ -101,42 +105,89 @@ def build(goal: str) -> Plan:
             description=
             "根据需求分析和架构设计修改软件实现",
 
+
             depends_on=[
+
                 "architecture_design"
+
             ],
 
+
             inputs=[
+
                 f"{workspace}/app.py",
                 f"{workspace}/test_app.py"
+
             ],
+
 
             acceptance=[
 
                 "代码修改完成",
 
-                "功能符合需求"
+                "功能符合需求",
+
+                "自动化测试通过"
 
             ],
 
+
             max_retries=2,
+
 
             metadata={
 
+
                 "domain":
+
                 "software_engineering",
 
+
                 "workspace":
+
                 workspace,
 
+
+                # Developer生成的真实产物
+
                 "expected_outputs":[
-                    f"{workspace}/app.py"
+
+                    "app.py"
+
+                ],
+
+
+
+                # 增加机器验收条件
+                # 让developer第一次错误修改时触发retry
+
+                "checks":[
+
+
+                    {
+
+                        "id":
+
+                        "implementation_tests_pass",
+
+
+                        "check_type":
+
+                        "command",
+
+
+                        "command":
+
+                        "pytest examples/software_task/test_app.py -v"
+
+                    }
+
+
                 ]
 
             }
 
         ),
-
-
 
         # ======================
         # 4. Tester
@@ -164,7 +215,7 @@ def build(goal: str) -> Plan:
                 "所有测试通过"
             ],
 
-            max_retries=2,
+            
 
             metadata={
 
@@ -230,7 +281,7 @@ def build(goal: str) -> Plan:
 
             ],
 
-            max_retries=2,
+
 
             metadata={
 
@@ -271,7 +322,7 @@ def build(goal: str) -> Plan:
 
             ],
 
-            max_retries=1,
+            
 
             metadata={
 
@@ -311,3 +362,88 @@ def build(goal: str) -> Plan:
         ]
 
     )
+
+
+
+class SoftwareDomainAdapter(DomainAdapter):
+
+    name = "software"
+
+
+    def register_tools(
+        self,
+        registry,
+        workspace
+    ):
+
+        shell_runner = ShellRunner(
+            workspace
+        )
+
+
+        registry.register(
+            FileEditor(workspace)
+        )
+
+
+        registry.register(
+            shell_runner
+        )
+
+
+        registry.register(
+            TestRunner(shell_runner)
+        )
+
+
+
+    def build_agents(
+        self,
+        model_client,
+        tools
+    ):
+
+        # 后续接入 analyst/developer/tester
+        return []
+
+
+
+    def build_plan(
+        self,
+        goal: str
+    ) -> Plan:
+
+        return build(goal)
+
+
+
+    def build_contract(
+        self,
+        goal: str
+    ):
+
+        from core.long_horizon.acceptance_contract import AcceptanceContract
+
+
+        return AcceptanceContract(
+
+            name="software_contract",
+
+            criteria=[
+
+                "app.py exists",
+
+                "pytest passed"
+
+            ]
+
+        )
+
+
+
+    def reset_workspace(
+        self,
+        workspace
+    ):
+
+        pass
