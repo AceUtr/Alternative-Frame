@@ -1,15 +1,17 @@
 from core.main_agent import MainAgent
 from core.agents import AgentRegistry, DeterministicAgent
 from core.orchestrator import Orchestrator
-from domains.software_demo import build
+from domains.software_demo import SoftwareDomainAdapter
 
-from evaluator.evaluator import evaluate
+
 from core.acceptance import AcceptanceEvaluator
 from core.models import AgentResult
 
 
 import os
 import subprocess
+import difflib
+from pathlib import Path
 from datetime import datetime
 
 
@@ -26,8 +28,17 @@ TEST_EXIT_CODE = None
 
 
 
-PROJECT = "examples/software_task"
-APP_FILE = f"{PROJECT}/app.py"
+from pathlib import Path
+
+
+ROOT_DIR = Path(__file__).parent
+
+
+PROJECT = ROOT_DIR / "examples" / "software_task"
+
+APP_FILE = PROJECT / "app.py"
+
+TEST_FILE = PROJECT / "test_app.py"
 
 
 
@@ -206,7 +217,7 @@ No bug detected.
 
 
 
-    # =====================================
+        # =====================================
     # Developer
     # =====================================
 
@@ -291,8 +302,7 @@ No bug detected.
 
 
         # ==========================
-        # Retry attempt:
-        # fix according to feedback
+        # Retry attempt
         # ==========================
 
         else:
@@ -332,7 +342,8 @@ No bug detected.
 
 
 
-            AFTER_CODE = code
+        AFTER_CODE = code
+
 
 
         print("\nAfter:")
@@ -342,27 +353,36 @@ No bug detected.
 
         # ==========================
         # Run verification test
+        # Through ToolRegistry
         # ==========================
 
-        print("\nDeveloper running verification test...")
+        print(
+            "\nDeveloper running verification test..."
+        )
+
+        command = (
+            f"pytest {TEST_FILE} -v"
+        )
 
 
-        test_result = subprocess.run(
+        tool_result = context["tools"].execute(
 
-            [
-                "pytest",
-                f"{PROJECT}/test_app.py",
-                "-v"
-            ],
-
-            capture_output=True,
-
-            text=True
+            
+            "test_runner",
+            {
+                "command": command
+            }
+                
 
         )
 
 
-        test_output = test_result.stdout + test_result.stderr
+
+        test_output = tool_result.output
+
+
+        test_exit_code = tool_result.exit_code
+
 
 
         print(test_output)
@@ -370,7 +390,9 @@ No bug detected.
 
 
         test_success = (
-            test_result.returncode == 0
+
+            test_exit_code == 0
+
         )
 
 
@@ -391,11 +413,13 @@ No bug detected.
                 summary=
                 "Source code modified and verified",
 
+
                 artifacts=[
 
                     APP_FILE
 
                 ],
+
 
                 evidence=[
 
@@ -405,27 +429,39 @@ No bug detected.
 
                 ],
 
+
                 tool_records=[
 
                     {
 
-                        "tool":"test_runner",
+                        "tool":
+                        "test_runner",
 
-                        "arguments":{
+
+                        "arguments":
+
+                        {
 
                             "command":
-                            "pytest examples/software_task/test_app.py -v"
-
+                            f"pytest {TEST_FILE} -v"
                         },
 
-                        "success":True,
+
+                        "success":
+                        True,
+
 
                         "exit_code":
-                        test_result.returncode,
+                        test_exit_code,
 
-                        "metadata":{
 
-                            "artifacts":[
+                        "metadata":
+
+                        {
+
+                            "artifacts":
+
+                            [
 
                                 APP_FILE
 
@@ -440,6 +476,7 @@ No bug detected.
             )
 
 
+
         else:
 
 
@@ -447,16 +484,20 @@ No bug detected.
 
                 subtask_id=task.id,
 
+
                 status="failed",
+
 
                 summary=
                 "Source code modified but verification failed",
+
 
                 artifacts=[
 
                     APP_FILE
 
                 ],
+
 
                 evidence=[
 
@@ -466,33 +507,47 @@ No bug detected.
 
                 ],
 
+
                 failures=[
 
                     test_output
 
                 ],
 
+
                 tool_records=[
 
                     {
 
-                        "tool":"test_runner",
+                        "tool":
+                        "test_runner",
 
-                        "arguments":{
+
+                        "arguments":
+
+                        {
 
                             "command":
-                            "pytest examples/software_task/test_app.py -v"
+                            f"pytest {TEST_FILE} -v"
 
                         },
 
-                        "success":False,
+
+                        "success":
+                        False,
+
 
                         "exit_code":
-                        test_result.returncode,
+                        test_exit_code,
 
-                        "metadata":{
 
-                            "artifacts":[
+                        "metadata":
+
+                        {
+
+                            "artifacts":
+
+                            [
 
                                 APP_FILE
 
@@ -510,37 +565,52 @@ No bug detected.
     # Tester
     # =====================================
 
-    elif task.role == "tester":
 
+    elif task.role == "tester":
 
         print("Running tests...")
 
 
-        result = subprocess.run(
-
-            [
-                "pytest",
-                f"{PROJECT}/test_app.py",
-                "-v"
-            ],
-
-            capture_output=True,
-
-            text=True
-
+        command = (
+            f"pytest {TEST_FILE} -v"
         )
 
 
-        TEST_OUTPUT = result.stdout
+        # =====================================
+        # 使用工具执行测试
+        # =====================================
 
-        TEST_EXIT_CODE = result.returncode
+        tool_result = context["tools"].execute(
+            "test_runner",
+            
+            {
+                "command": command
+            }
+            
+        )
+
+
+        TEST_OUTPUT = tool_result.output
+
+        TEST_EXIT_CODE = tool_result.exit_code
+
 
 
         print(TEST_OUTPUT)
 
 
 
-        if TEST_EXIT_CODE == 0:
+        test_success = (
+            TEST_EXIT_CODE == 0
+        )
+
+
+
+        # =====================================
+        # 测试通过
+        # =====================================
+
+        if test_success:
 
 
             return AgentResult(
@@ -549,32 +619,60 @@ No bug detected.
 
                 status="success",
 
-                summary="All tests passed",
+
+                summary=
+                "Regression tests passed",
+
+
+                artifacts=[
+
+                    "examples/software_task/test_app.py"
+
+                ],
+
 
                 evidence=[
-                    f"pytest_exit_code={TEST_EXIT_CODE}"
+
+                    f"command={command}",
+
+                    f"exit_code={TEST_EXIT_CODE}",
+
+                    "real_test_execution"
+
                 ],
+
 
                 tool_records=[
 
                     {
 
-                        "tool": "test_runner",
+                        "tool":
+                        "test_runner",
 
-                        "arguments": {
+
+                        "arguments":{
 
                             "command":
-                            "pytest examples/software_task/test_app.py -v"
+                            command
 
                         },
 
-                        "success": True,
 
-                        "exit_code": 0,
+                        "success":
+                        True,
 
-                        "metadata": {
 
-                            "artifacts": [
+                        "exit_code":
+                        TEST_EXIT_CODE,
+
+
+                        "output_summary":
+                        TEST_OUTPUT[-1000:],
+
+
+                        "metadata":{
+
+                            "artifacts":[
 
                                 "examples/software_task/test_app.py"
 
@@ -589,6 +687,11 @@ No bug detected.
             )
 
 
+
+        # =====================================
+        # 测试失败
+        # =====================================
+
         else:
 
 
@@ -596,9 +699,20 @@ No bug detected.
 
                 subtask_id=task.id,
 
+
                 status="failed",
 
-                summary="Tests failed",
+
+                summary=
+                "Regression tests failed",
+
+
+                artifacts=[
+
+                    "examples/software_task/test_app.py"
+
+                ],
+
 
                 failures=[
 
@@ -606,32 +720,49 @@ No bug detected.
 
                 ],
 
+
                 evidence=[
 
-                    f"pytest_exit_code={TEST_EXIT_CODE}"
+                    f"command={command}",
+
+                    f"exit_code={TEST_EXIT_CODE}",
+
+                    "real_test_execution_failed"
 
                 ],
+
 
                 tool_records=[
 
                     {
 
-                        "tool": "test_runner",
+                        "tool":
+                        "test_runner",
 
-                        "arguments": {
+
+                        "arguments":{
 
                             "command":
-                            "pytest examples/software_task/test_app.py -v"
+                            command
 
                         },
 
-                        "success": False,
 
-                        "exit_code": TEST_EXIT_CODE,
+                        "success":
+                        False,
 
-                        "metadata": {
 
-                            "artifacts": [
+                        "exit_code":
+                        TEST_EXIT_CODE,
+
+
+                        "output_summary":
+                        TEST_OUTPUT[-1000:],
+
+
+                        "metadata":{
+
+                            "artifacts":[
 
                                 "examples/software_task/test_app.py"
 
@@ -649,23 +780,95 @@ No bug detected.
     # Reporter
     # =====================================
 
-    elif task.role=="reporter":
+
+    elif task.role == "reporter":
+
+        from pathlib import Path
+        import difflib
 
 
-        report_file = f"{PROJECT}/software_agent_report.md"
+        workspace = Path(PROJECT)
 
 
-        status = "PASS" if TEST_EXIT_CODE == 0 else "FAILED"
+        artifact_dir = (
+            workspace /
+            "artifacts"
+        )
 
 
+        artifact_dir.mkdir(
+            exist_ok=True
+        )
+
+
+        report_file = (
+            artifact_dir /
+            "software_report.md"
+        )
+
+
+        # ==========================
+        # Test evidence
+        # ==========================
+
+        test_success = (
+            TEST_EXIT_CODE == 0
+        )
+
+
+        status = (
+            "PASS"
+            if test_success
+            else "FAILED"
+        )
+
+
+
+        # ==========================
+        # Code diff
+        # ==========================
+
+        diff = "\n".join(
+
+            difflib.unified_diff(
+
+                BEFORE_CODE.splitlines(),
+
+                AFTER_CODE.splitlines(),
+
+                fromfile="before/app.py",
+
+                tofile="after/app.py",
+
+                lineterm=""
+
+            )
+
+        )
+
+
+
+        # ==========================
+        # Generate report
+        # ==========================
 
         content = f"""
 # Software Engineering Agent Report
 
 
-## Execution Time
+## Execution Evidence
 
-{datetime.now()}
+
+Status:
+
+{status}
+
+
+
+## Modified File
+
+
+examples/software_task/app.py
 
 
 
@@ -683,115 +886,209 @@ No bug detected.
 
 
 
-## Testing Evidence
+## Change Diff
 
 
-Status:
-
-{status}
+{diff}
 
 
-Exit Code:
+
+## Test Command
+
+
+pytest examples/software_task/test_app.py -v
+
+
+
+## Test Exit Code
+
 
 {TEST_EXIT_CODE}
 
 
 
+## Test Output
 
 
 {TEST_OUTPUT}
 
 
 
-## Conclusion
+## Risk
 
 
-Software issue fixed automatically.
+No additional risk detected.
 
 """
 
 
-        with open(
-            report_file,
-            "w",
+        report_file.write_text(
+
+            content,
+
             encoding="utf8"
-        ) as f:
 
-            f.write(content)
-
+        )
 
 
         print(
+
             "Report saved:",
+
             report_file
+
         )
 
 
 
         return AgentResult(
 
-        subtask_id=task.id,
+            subtask_id=task.id,
 
-        status="success",
 
-        summary="All tests passed",
+            status=(
 
-        evidence=[
-        f"pytest_exit_code={TEST_EXIT_CODE}"
-    ],
+                "success"
 
-        tool_records=[
+                if test_success
 
-        {
+                else "failed"
 
-            "tool":"test_runner",
+            ),
 
-            "arguments":{
 
-                "command":
-                "pytest examples/software_task/test_app.py -v"
+            summary=(
 
-            },
+                "Evidence report generated"
 
-            "success":True,
+                if test_success
 
-            "exit_code":0,
+                else "Evidence report generated but tests failed"
 
-            "metadata":{
+            ),
 
-                "artifacts":[
-                    "examples/software_task/test_app.py"
+
+            artifacts=[
+
+                str(report_file)
+
+            ],
+
+
+            evidence=[
+
+                f"pytest_exit_code={TEST_EXIT_CODE}",
+
+                "runtime_report_generated"
+
+            ],
+
+
+            failures=(
+
+                []
+
+                if test_success
+
+                else [
+
+                    "pytest failed"
+
                 ]
 
-            }
+            ),
 
-        }
 
-    ]
+            tool_records=[
 
-)
+                {
+
+                    "tool":
+
+                    "test_runner",
+
+
+                    "arguments":
+
+                    {
+
+                        "command":
+
+                        "pytest examples/software_task/test_app.py -v"
+
+                    },
+
+
+                    "success":
+
+                    test_success,
+
+
+                    "exit_code":
+
+                    TEST_EXIT_CODE,
+
+
+                    "output_summary":
+
+                    TEST_OUTPUT[-1000:]
+
+                }
+
+            ]
+
+        )
     # =====================================
+# Main
+# =====================================
+
+# =====================================
 # Main
 # =====================================
 
 def main():
 
-    registry = AgentRegistry()
 
+    workspace = "examples/software_task"
+
+
+    # ==========================
+    # 1. 创建领域Adapter
+    # ==========================
+
+    adapter = SoftwareDomainAdapter()
+
+
+
+    # ==========================
+    # 2. 配置领域
+    # ==========================
+
+    tools, agent_registry = adapter.configure(
+        workspace=workspace
+    )
+
+
+
+    # ==========================
+    # 3. 注册Agent
+    # ==========================
 
     roles = [
+
         "analyst",
         "architect",
         "reviewer",
         "developer",
         "tester",
         "reporter"
+
     ]
 
 
     for role in roles:
 
-        registry.register(
+        agent_registry.register(
 
             DeterministicAgent(
 
@@ -805,57 +1102,134 @@ def main():
 
 
 
+    # ==========================
+    # 4. Orchestrator
+    # ==========================
+
     orchestrator = Orchestrator(
 
-        registry=registry,
+        registry=agent_registry,
 
-        acceptance=AcceptanceEvaluator()
+        acceptance=AcceptanceEvaluator(),
 
+        tools=tools
     )
 
 
+
+    # ==========================
+    # 5. Main Agent
+    # ==========================
 
     agent = MainAgent(
 
         orchestrator,
 
-        planner=build
+        planner=adapter.build_plan
 
     )
 
 
 
+    # ==========================
+    # 6. Goal
+    # ==========================
+
     goal = """
+
 Analyze software project,
+
 locate bugs,
+
 modify source code,
+
 run regression tests,
+
 generate evidence report.
+
 """
 
 
-    report = agent.execute(goal)
+
+    # ==========================
+    # 7. Build Plan
+    # ==========================
+
+    plan = adapter.build_plan(goal)
 
 
+
+    # ==========================
+    # 8. Execute Agent
+    # ==========================
+
+    report = agent.execute(plan)
+
+
+
+    # ==========================
+    # 9. Output
+    # ==========================
+
+   
 
     print("\n========== REPORT ==========")
 
-
     print(
-        "Status:",
-        report.status
-    )
+    "Status:",
+    report.status
+)
+
+
+    print("\nTasks:")
 
 
     for task_id, result in report.results.items():
 
+        print("\n================")
+        print("Task:", task_id)
+
         print(
-            task_id,
-            ":",
-            result.summary
+        "Status:",
+        result.status
+    )
+
+    print(
+        "Summary:",
+        result.summary
+    )
+
+    print(
+        "Failures:"
+    )
+
+    for failure in result.failures:
+        print(
+            " -",
+            failure
         )
 
 
+    print(
+        "Evidence:"
+    )
+
+    for evidence in result.evidence:
+        print(
+            " -",
+            evidence
+        )
+
+
+    print(
+        "Artifacts:"
+    )
+
+    for artifact in result.artifacts:
+        print(
+            " -",
+            artifact
+        )
 
 if __name__ == "__main__":
 
