@@ -178,7 +178,7 @@ def build(goal: str) -> Plan:
 
                         "command":
 
-                        "pytest examples/software_task/test_app.py -v"
+                        "pytest test_app.py -v"
 
                     }
 
@@ -238,7 +238,7 @@ def build(goal: str) -> Plan:
                         "command",
 
                         "command":
-                        "pytest examples/software_task/test_app.py -v"
+                        "pytest test_app.py -v"
 
                     }
 
