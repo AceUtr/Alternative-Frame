@@ -5,11 +5,19 @@ from core.tools.file_editor import FileEditor
 from core.tools.shell_runner import ShellRunner
 from core.tools.test_runner import TestRunner
 
+from pathlib import Path
+
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+
+
+
+workspace = (
+        ROOT_DIR /
+        "examples" /
+        "software_task"
+    )
 def build(goal: str) -> Plan:
-
-
-    workspace = "examples/software_task"
-
 
     tasks = [
 
@@ -28,8 +36,8 @@ def build(goal: str) -> Plan:
 
             inputs=[
                 f"{workspace}/requirements.md",
-                f"{workspace}/app.py",
-                f"{workspace}/test_app.py"
+                f"{workspace}/src/app.py",
+                f"{workspace}/tests/test_app.py"
             ],
 
             acceptance=[
@@ -115,8 +123,8 @@ def build(goal: str) -> Plan:
 
             inputs=[
 
-                f"{workspace}/app.py",
-                f"{workspace}/test_app.py"
+                 f"{workspace}/src/app.py",
+                 f"{workspace}/tests/test_app.py"
 
             ],
 
@@ -152,7 +160,7 @@ def build(goal: str) -> Plan:
 
                 "expected_outputs":[
 
-                    "app.py"
+                    "src/app.py"
 
                 ],
 
@@ -178,8 +186,7 @@ def build(goal: str) -> Plan:
 
                         "command":
 
-                        "pytest test_app.py -v"
-
+                        "pytest tests/test_app.py -v"
                     }
 
 
@@ -207,8 +214,8 @@ def build(goal: str) -> Plan:
 
             max_retries=0,
             inputs=[
-                f"{workspace}/test_app.py",
-                f"{workspace}/app.py"
+                 f"{workspace}/src/app.py",
+                 f"{workspace}/tests/test_app.py"
             ],
 
             acceptance=[
@@ -238,7 +245,7 @@ def build(goal: str) -> Plan:
                         "command",
 
                         "command":
-                        "pytest test_app.py -v"
+                        "pytest tests/test_app.py -v"
 
                     }
 
@@ -269,8 +276,8 @@ def build(goal: str) -> Plan:
             max_retries=0,
 
             inputs=[
-                f"{workspace}/app.py",
-                f"{workspace}/test_app.py"
+                 f"{workspace}/src/app.py",
+                 f"{workspace}/tests/test_app.py"
             ],
 
             acceptance=[
@@ -349,15 +356,15 @@ def build(goal: str) -> Plan:
 
         final_acceptance=[
 
-            "需求分析完成",
+            "src/app.py exists",
 
-            "代码问题修复",
+            "tests/test_app.py exists",
 
-            "自动化测试通过",
+            "pytest tests/test_app.py -v passed",
 
-            "代码最终审查完成",
+            "review_complete",
 
-            "生成运行证据"
+            "report_generated"
 
         ]
 
@@ -382,12 +389,12 @@ class SoftwareDomainAdapter(DomainAdapter):
 
 
         registry.register(
-            FileEditor(workspace)
+            shell_runner
         )
 
 
         registry.register(
-            shell_runner
+            TestRunner(shell_runner)
         )
 
 
