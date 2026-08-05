@@ -21,6 +21,12 @@ class ShellRunner(Tool):
 
     def execute(self, arguments: Dict[str, Any]) -> ToolResult:
         command = arguments.get("command", "")
+
+        print(
+            "Shell workspace:",
+            self.workspace
+        )
+
         if not command:
             return ToolResult(self.name, False, error="command is empty")
         if any(token in command.lower() for token in ("format c:", "rm -rf /", "del /s /q c:\\", "shutdown")):
