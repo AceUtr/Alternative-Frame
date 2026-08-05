@@ -33,12 +33,30 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent
 
+workspace = (
+    ROOT_DIR
+    /
+    "examples"
+    /
+    "software_task"
+)
+
 
 PROJECT = ROOT_DIR / "examples" / "software_task"
 
-APP_FILE = PROJECT / "app.py"
 
-TEST_FILE = PROJECT / "test_app.py"
+APP_FILE = (
+    PROJECT /
+    "src" /
+    "app.py"
+)
+
+
+TEST_FILE = (
+    PROJECT /
+    "tests" /
+    "test_app.py"
+)
 
 
 
@@ -380,6 +398,12 @@ No bug detected.
 
         test_output = tool_result.output
 
+        print("\nTEST RESULT OBJECT:")
+        print(tool_result.__dict__)
+
+
+        print(test_output)
+
 
         test_exit_code = tool_result.exit_code
 
@@ -424,6 +448,8 @@ No bug detected.
                 evidence=[
 
                     "developer_completed",
+
+                    "tool=test_runner;success=True",
 
                     "implementation_test_passed"
 
@@ -503,7 +529,10 @@ No bug detected.
 
                     "developer_completed",
 
+                    "tool=test_runner;success=False",
+
                     "implementation_test_failed"
+
 
                 ],
 
@@ -626,8 +655,7 @@ No bug detected.
 
                 artifacts=[
 
-                    "examples/software_task/test_app.py"
-
+                    "examples/software_task/tests/test_app.py"
                 ],
 
 
@@ -674,7 +702,7 @@ No bug detected.
 
                             "artifacts":[
 
-                                "examples/software_task/test_app.py"
+                                "examples/software_task/tests/test_app.py"
 
                             ]
 
@@ -709,7 +737,7 @@ No bug detected.
 
                 artifacts=[
 
-                    "examples/software_task/test_app.py"
+                    "examples/software_task/tests/test_app.py"
 
                 ],
 
@@ -764,7 +792,7 @@ No bug detected.
 
                             "artifacts":[
 
-                                "examples/software_task/test_app.py"
+                                "examples/software_task/tests/test_app.py"
 
                             ]
 
@@ -868,7 +896,7 @@ Status:
 ## Modified File
 
 
-examples/software_task/app.py
+examples/software_task/src/app.py
 
 
 
@@ -896,7 +924,7 @@ examples/software_task/app.py
 ## Test Command
 
 
-pytest examples/software_task/test_app.py -v
+pytest examples/software_task/tests/test_app.py -v
 
 
 
@@ -1014,7 +1042,7 @@ No additional risk detected.
 
                         "command":
 
-                        "pytest examples/software_task/test_app.py -v"
+                        "pytest examples/software_task/tests/test_app.py -v"
 
                     },
 
@@ -1078,9 +1106,9 @@ def main():
 
         "analyst",
         "architect",
-        "reviewer",
         "developer",
         "tester",
+        "reviewer",
         "reporter"
 
     ]
