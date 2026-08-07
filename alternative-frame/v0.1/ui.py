@@ -40,6 +40,8 @@ from core.planning import PlanningPipeline
 from core.preflight import HarnessPreflightChecker
 from core.tools import ExperimentRunner, FileEditor, GitClient, ShellRunner, TestRunner, ToolRegistry
 from run_api_demo import ROLE_PROMPTS
+from run_research_demo import FAULT_SCENARIOS, GOAL as RESEARCH_GOAL, run_demo as run_research_demo
+from domains.research_demo import ResearchDomainAdapter
 
 
 COLORS = {
@@ -59,7 +61,8 @@ COLORS = {
 
 PROJECT_DIR = Path(__file__).resolve().parent
 TOOL_TEST_WORKSPACE = PROJECT_DIR / "tool_test_workspace"
-DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务")
+RESEARCH_EXECUTION_MODE = "Research Demo (offline)"
+DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务", RESEARCH_EXECUTION_MODE)
 DEVELOPER_EXECUTION_MODES = ("工具调用自检", "失败修复自检")
 
 
@@ -565,6 +568,15 @@ class FreshUI(tk.Tk):
         )
         self.execution_mode_box.pack(side=tk.LEFT)
         self.execution_mode_box.bind("<<ComboboxSelected>>", self._on_execution_mode_changed)
+        self.research_fault_scenario = tk.StringVar(value="normal")
+        ttk.Label(actions, text="Research scenario:").pack(side=tk.LEFT, padx=(12, 4))
+        ttk.Combobox(
+            actions,
+            textvariable=self.research_fault_scenario,
+            state="readonly",
+            values=FAULT_SCENARIOS,
+            width=14,
+        ).pack(side=tk.LEFT)
         self.developer_mode = tk.BooleanVar(value=False)
         tk.Checkbutton(
             actions,
@@ -591,6 +603,10 @@ class FreshUI(tk.Tk):
 
     def _on_execution_mode_changed(self, _event=None):
         mode = self.execution_mode.get()
+        if mode == RESEARCH_EXECUTION_MODE:
+            self.goal.delete("1.0", tk.END)
+            self.goal.insert("1.0", RESEARCH_GOAL)
+            return
         if mode not in ("工具调用自检", "失败修复自检"):
             return
         prompt_name = "REPAIR_PROMPT.txt" if mode == "失败修复自检" else "TEST_PROMPT.txt"
@@ -828,7 +844,7 @@ class FreshUI(tk.Tk):
 
     def test_connection(self):
         try:
-            config = self._config()
+            config = None if self.execution_mode.get() == RESEARCH_EXECUTION_MODE else self._config()
         except Exception as exc:
             messagebox.showwarning("配置不完整", str(exc))
             return
@@ -913,6 +929,55 @@ class FreshUI(tk.Tk):
 
     def _run_worker(self, goal, config, execution_mode, resume_run_id=None):
         try:
+            if execution_mode == RESEARCH_EXECUTION_MODE:
+                runs_root = long_horizon_runs_root() / "research"
+                run_id = resume_run_id or ("research_" + __import__("uuid").uuid4().hex[:8])
+                contract = ResearchDomainAdapter().build_contract(RESEARCH_GOAL)
+                contract_reply = queue.Queue(maxsize=1)
+                self.events.put(("contract_preview_request", (contract, contract_reply)))
+                contract = contract_reply.get()
+                if contract is None:
+                    self.events.put(("run_cancelled", "Research contract was not confirmed."))
+                    return
+                ContractValidator().validate(contract, expected_goal=RESEARCH_GOAL)
+
+                def on_research_event(kind, payload):
+                    if kind == "task_event":
+                        self.events.put((
+                            "task_event",
+                            (
+                                payload["event"],
+                                payload["task_id"],
+                                payload.get("result"),
+                                payload.get("attempt"),
+                            ),
+                        ))
+                    elif kind == "long_horizon_event":
+                        self.events.put((
+                            "long_horizon_event",
+                            (payload["event"], payload["payload"]),
+                        ))
+                    elif kind == "global_evaluator_event":
+                        self.events.put((
+                            "global_evaluator_event",
+                            (payload["event"], payload["payload"]),
+                        ))
+
+                report = run_research_demo(
+                    PROJECT_DIR / "examples" / "research_task",
+                    runs_root,
+                    run_id,
+                    fault_scenario=self.research_fault_scenario.get(),
+                    on_event=on_research_event,
+                    on_controller=lambda controller: setattr(self, "active_controller", controller),
+                    acceptance_contract=contract,
+                )
+                store = LongHorizonStore(runs_root)
+                self.events.put((
+                    "long_horizon_report",
+                    (report, store.state_path(report.state.run_id)),
+                ))
+                return
             pipeline = PlanningPipeline()
             tool_test = execution_mode in DEVELOPER_EXECUTION_MODES
             repair_test = execution_mode == "失败修复自检"

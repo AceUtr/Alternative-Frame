@@ -31,6 +31,9 @@ def run_demo(
     runs_dir: Path,
     run_id: str,
     fault_scenario: str = "normal",
+    on_event=None,
+    on_controller=None,
+    acceptance_contract=None,
 ):
     if fault_scenario not in FAULT_SCENARIOS:
         raise ValueError(f"unsupported fault scenario: {fault_scenario}")
@@ -69,7 +72,7 @@ def run_demo(
             "mode": "transient_failure",
             "fail_attempts": 1,
         }
-    contract = adapter.build_contract(GOAL)
+    contract = acceptance_contract or adapter.build_contract(GOAL)
 
     preflight = HarnessPreflightChecker().check(
         domains=domains,
@@ -92,6 +95,8 @@ def run_demo(
             payload["status"] = result.status
             payload["failures"] = list(result.failures)
         store.append_event(run_id, event, payload)
+        if on_event:
+            on_event("task_event", {"event": event, **payload, "result": result})
 
     orchestrator = Orchestrator(
         agents,
@@ -109,13 +114,33 @@ def run_demo(
         orchestrator,
         initial_planner=lambda _state: initial_plan,
         store=store,
-        evaluator=DeterministicGlobalEvaluator(contract, workspace),
+        evaluator=DeterministicGlobalEvaluator(
+            contract,
+            workspace,
+            on_event=(
+                (lambda event, payload: on_event(
+                    "global_evaluator_event",
+                    {"event": event, "payload": payload},
+                ))
+                if on_event
+                else None
+            ),
+        ),
         replanner=replan,
         local_recovery=LocalDAGRecoveryController(orchestrator, max_cycles=1),
         max_phases=2,
         max_total_tasks=12,
         acceptance_contract=contract.to_dict(),
+        on_event=(
+            (lambda event, payload: on_event(
+                "long_horizon_event", {"event": event, "payload": payload}
+            ))
+            if on_event
+            else None
+        ),
     )
+    if on_controller:
+        on_controller(controller)
     return controller.run(GOAL, run_id=run_id)
 
 
