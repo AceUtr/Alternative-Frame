@@ -6,7 +6,9 @@
     "examples/research_task/README.md",
     "prompts/research/research_prompt.md",
     "tests/test_research_demo.py",
-    "docs/research-demo.md"
+    "tests/test_research_ui_integration.py",
+    "docs/research-demo.md",
+    "ui.py"
   ],
   "import_modules": [
     "domains.research_demo"
@@ -20,7 +22,7 @@
   },
   "validation_goal": "Run a reproducible baseline and improved experiment, independently verify metrics, and produce a report",
   "test_commands": [
-    ["python", "-m", "pytest", "tests/test_research_demo.py", "-q", "-p", "no:cacheprovider"]
+    ["python", "-m", "pytest", "tests/test_research_demo.py", "tests/test_research_ui_integration.py", "-q", "-p", "no:cacheprovider"]
   ],
   "smoke_command": ["python", "run_research_demo.py"],
   "scan_paths": [
@@ -30,6 +32,8 @@
     "examples/research_task",
     "prompts/research",
     "tests/test_research_demo.py",
-    "docs/research-demo.md"
+    "tests/test_research_ui_integration.py",
+    "docs/research-demo.md",
+    "ui.py"
   ]
 }

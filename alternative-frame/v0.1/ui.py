@@ -40,6 +40,12 @@ from core.planning import PlanningPipeline
 from core.preflight import HarnessPreflightChecker
 from core.tools import ExperimentRunner, FileEditor, GitClient, ShellRunner, TestRunner, ToolRegistry
 from run_api_demo import ROLE_PROMPTS
+from domains.research_demo import ResearchDomainAdapter
+from run_research_demo import (
+    FAULT_SCENARIOS,
+    GOAL as RESEARCH_GOAL,
+    run_demo as run_research_demo,
+)
 
 
 COLORS = {
@@ -59,7 +65,8 @@ COLORS = {
 
 PROJECT_DIR = Path(__file__).resolve().parent
 TOOL_TEST_WORKSPACE = PROJECT_DIR / "tool_test_workspace"
-DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务")
+RESEARCH_EXECUTION_MODE = "Research Demo (offline)"
+DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务", RESEARCH_EXECUTION_MODE)
 DEVELOPER_EXECUTION_MODES = ("工具调用自检", "失败修复自检")
 
 
@@ -217,6 +224,74 @@ def build_recovery_plan(pipeline: PlanningPipeline, state, evaluation) -> Plan:
     for task in plan.subtasks:
         task.description += recovery_note
     return plan
+
+
+def run_research_ui_bridge(
+    *,
+    fixture_root: Path,
+    runs_root: Path,
+    run_id: str,
+    fault_scenario: str,
+    confirm_contract,
+    event_sink,
+    controller_sink=None,
+    runner=run_research_demo,
+):
+    """Execute the offline research mode behind the existing UI event protocol."""
+    adapter = ResearchDomainAdapter()
+    contract = adapter.build_contract(RESEARCH_GOAL)
+    confirmed = confirm_contract(contract)
+    if confirmed is None:
+        event_sink("run_cancelled", "用户取消了科研验收合同，未启动 Controller 或工具")
+        return None
+    event_sink(
+        "contract_confirmed",
+        {
+            "criterion_count": len(confirmed.criteria),
+            "required_count": sum(item.required for item in confirmed.criteria),
+        },
+    )
+
+    def on_plan(plan, _contract):
+        event_sink("plan", ("research", plan))
+
+    def on_task(event, task, result):
+        event_sink(
+            "task_event",
+            (event, task.id, result, task.metadata.get("runtime_attempt")),
+        )
+
+    def on_controller(controller):
+        if controller_sink:
+            controller_sink(controller)
+        event_sink("controller_ready", None)
+
+    report = runner(
+        fixture_root,
+        runs_root,
+        run_id,
+        fault_scenario=fault_scenario,
+        on_plan_ready=on_plan,
+        on_preflight=lambda report: event_sink("preflight_report", report),
+        on_task_event=on_task,
+        on_long_event=lambda event, payload: event_sink(
+            "long_horizon_event", (event, payload)
+        ),
+        on_global_event=lambda event, payload: event_sink(
+            "global_evaluator_event", (event, payload)
+        ),
+        on_controller_ready=on_controller,
+        contract_override=confirmed,
+    )
+    event_sink(
+        "research_report",
+        (
+            report,
+            LongHorizonStore(runs_root).state_path(report.state.run_id),
+            fixture_root / "artifacts" / "research_report.md",
+        ),
+    )
+    return report
 
 
 def validate_contract_json(text: str, expected_goal: str, validator=None) -> AcceptanceContract:
@@ -565,6 +640,15 @@ class FreshUI(tk.Tk):
         )
         self.execution_mode_box.pack(side=tk.LEFT)
         self.execution_mode_box.bind("<<ComboboxSelected>>", self._on_execution_mode_changed)
+        self.research_scenario = tk.StringVar(value="normal")
+        self.research_scenario_box = ttk.Combobox(
+            actions,
+            textvariable=self.research_scenario,
+            state="readonly",
+            values=FAULT_SCENARIOS,
+            width=14,
+        )
+        self.research_scenario_box.pack(side=tk.LEFT, padx=(10, 0))
         self.developer_mode = tk.BooleanVar(value=False)
         tk.Checkbutton(
             actions,
@@ -591,6 +675,11 @@ class FreshUI(tk.Tk):
 
     def _on_execution_mode_changed(self, _event=None):
         mode = self.execution_mode.get()
+        if mode == RESEARCH_EXECUTION_MODE:
+            self.goal.delete("1.0", tk.END)
+            self.goal.insert("1.0", RESEARCH_GOAL)
+            self.mode.set("本地 Stub")
+            return
         if mode not in ("工具调用自检", "失败修复自检"):
             return
         prompt_name = "REPAIR_PROMPT.txt" if mode == "失败修复自检" else "TEST_PROMPT.txt"
@@ -872,7 +961,17 @@ class FreshUI(tk.Tk):
         self._set_state("运行中", COLORS["blue_dark"])
         self.append_log(f"MainAgent ← {goal}")
         execution_mode = self.execution_mode.get()
-        threading.Thread(target=self._run_worker, args=(goal, config, execution_mode, None), daemon=True).start()
+        threading.Thread(
+            target=self._run_worker,
+            args=(
+                goal,
+                config,
+                execution_mode,
+                None,
+                self.research_scenario.get(),
+            ),
+            daemon=True,
+        ).start()
 
     def pause_run(self):
         if not self.running or self.active_controller is None:
@@ -907,12 +1006,38 @@ class FreshUI(tk.Tk):
         self._set_state("正在恢复长程任务", COLORS["blue_dark"])
         threading.Thread(
             target=self._run_worker,
-            args=(state.goal, config, "长程任务", state.run_id),
+            args=(state.goal, config, "长程任务", state.run_id, "normal"),
             daemon=True,
         ).start()
 
-    def _run_worker(self, goal, config, execution_mode, resume_run_id=None):
+    def _run_worker(
+        self,
+        goal,
+        config,
+        execution_mode,
+        resume_run_id=None,
+        research_scenario="normal",
+    ):
         try:
+            if execution_mode == RESEARCH_EXECUTION_MODE:
+                def confirm_contract(contract):
+                    reply = queue.Queue(maxsize=1)
+                    self.events.put(("contract_preview_request", (contract, reply)))
+                    return reply.get()
+
+                run_id = "research_ui_" + __import__("uuid").uuid4().hex[:8]
+                run_research_ui_bridge(
+                    fixture_root=PROJECT_DIR / "examples" / "research_task",
+                    runs_root=PROJECT_DIR / "runs" / "research",
+                    run_id=run_id,
+                    fault_scenario=research_scenario,
+                    confirm_contract=confirm_contract,
+                    event_sink=lambda kind, payload: self.events.put((kind, payload)),
+                    controller_sink=lambda controller: setattr(
+                        self, "active_controller", controller
+                    ),
+                )
+                return
             pipeline = PlanningPipeline()
             tool_test = execution_mode in DEVELOPER_EXECUTION_MODES
             repair_test = execution_mode == "失败修复自检"
@@ -1144,6 +1269,10 @@ class FreshUI(tk.Tk):
                     self._show_long_horizon_event(payload)
                 elif kind == "long_horizon_report":
                     self._show_long_horizon_report(payload)
+                elif kind == "research_report":
+                    report, state_path, report_path = payload
+                    self.append_log(f"REPORT → {report_path}")
+                    self._show_long_horizon_report((report, state_path))
                 elif kind == "replanner_event":
                     self._show_replanner_event(payload)
                 elif kind == "initial_plan_event":
@@ -1258,6 +1387,14 @@ class FreshUI(tk.Tk):
                 vals[3] = result.status
                 vals[4] = str(result.attempts)
             self.append_log(f"{task_id} → {result.status}")
+            for record in result.tool_records:
+                self.append_log(
+                    "TOOL EVIDENCE → "
+                    f"{record.get('tool', 'unknown')} · "
+                    f"args={self._compact(record.get('arguments', {}), 180)} · "
+                    f"exit_code={record.get('exit_code')} · "
+                    f"artifacts={record.get('metadata', {}).get('artifacts', [])}"
+                )
             self._set_dag_status(task_id, result.status)
         elif event == "task_retry_scheduled" and result is not None:
             reason = "; ".join(result.failures[:3]) or result.status
