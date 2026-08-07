@@ -8,6 +8,7 @@ from core.agents import Agent, AgentRegistry
 from core.long_horizon import (
     AcceptanceContract,
     EvidenceBundle,
+    GoalEvaluation,
     GoalCriterion,
     HardEvidenceGate,
     LongHorizonController,
