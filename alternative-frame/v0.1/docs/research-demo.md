@@ -342,6 +342,32 @@ python run_research_demo.py --fault-scenario local-recovery
 `events.jsonl`。状态与阶段级 `local_recovery_cycles`、`executed_task_count`
 写入 `state.json`，可供后续 UI 展示和现场审计。
 
+### 7.2 三层恢复的准确边界
+
+Demo 复用现有 Harness 的三层机制：
+
+1. 任务级反馈重试：`task-retry` 根据 `retry_feedback` 修正命令并清理错误产物；
+2. 阶段内局部 DAG 恢复：`local-recovery` 冻结稳定节点，只重建受影响子图；
+3. 跨阶段全局补证：第一阶段缺少独立复验时，GlobalEvaluator 拒绝完成，第二阶段
+   生成最小复验 DAG。
+
+上述能力仅验证受控、确定性的演示故障，不代表能够恢复任意外部服务、硬件或系统故障。
+
+### 7.3 UI 操作
+
+启动主界面：
+
+```powershell
+python ui.py
+```
+
+选择 `Research Demo (offline)` 和一个故障场景。固定科研目标会自动填入，运行模式
+自动切换到本地 Stub，不需要 API Key。点击开始后先预览验收合同；取消时不会创建
+Controller，也不会执行工具。确认后可在任务表、DAG、日志和验收证据页查看阶段、
+节点、attempts、工具参数、退出码、产物、`global_hard_gate`、重试与恢复事件。
+暂停按钮复用 `active_controller`，在安全阶段边界暂停。最终日志显示研究报告和
+`state.json` 路径。
+
 ## 8. 产物与证据规范
 
 建议的任务工作区产物：
@@ -419,7 +445,8 @@ prompts/research/research_prompt.md
 run_research_demo.py
 ```
 
-当前设计和实现均未修改 `core/` 或主 `ui.py`。
+当前设计和实现未修改 `core/` 冻结接口。主 `ui.py` 仅注册离线 Research 模式并
+复用现有合同确认、DAG、事件、证据和暂停组件，没有新增第二套 UI 状态机。
 `ResearchDomainAdapter.reset_workspace()` 只删除声明过的生成文件，并保留 Fixture
 源码和其他未知文件；重复调用得到相同的干净初始状态。
 `run_research_demo.py` 使用现有 `LongHorizonController` 运行两阶段真实科研闭环，
@@ -435,6 +462,9 @@ run_research_demo.py
   JSON 指标和产物登记；
 - `ShellRunner` 可以设置工作目录和超时，但科研 Adapter 仍需对所有输入/输出
   路径做显式工作区校验。
+- 默认 CLI 使用共享 Fixture 工作区，但每次运行前只删除白名单内生成产物；
+  遇到 Windows 文件锁会明确失败，不会把旧产物继续作为新运行证据；
+- 当前未实现动态模型科研 Replanner，也不执行原始 GPU 训练或联网 Prompt 评测。
 
 已由队长确认：
 

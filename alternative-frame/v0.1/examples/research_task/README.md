@@ -45,5 +45,35 @@ after reading structured retry feedback. `local-recovery` uses the existing
 `LocalDAGRecoveryController` to rerun only the failed improved-experiment
 subgraph. Both scenarios persist auditable events under `runs/research/`.
 
+## Desktop UI
+
+Run `python ui.py`, select `Research Demo (offline)`, choose one of the three
+fault scenarios, and confirm the fixed acceptance contract. This mode is fully
+offline and never asks for an API key. Cancelling the contract prevents the
+controller and tools from starting.
+
+The UI shows phase/task state, DAG nodes, attempts, tool arguments and exit
+codes, hard-gate evidence, retry and local-recovery events, and the final
+report path. The active controller is exposed to the existing safe-pause
+button.
+
+## Audit files
+
+Each CLI or UI run writes:
+
+```text
+runs/research/<run_id>/state.json
+runs/research/<run_id>/events.jsonl
+```
+
+`state.json` contains phases, task counts, evidence records, missing criteria,
+and recovery counters. `events.jsonl` is an append-only timeline containing
+task, retry, local recovery, hard-gate, and completion events. These run
+histories are temporary evidence and must not be committed.
+
+The fixture reset deletes only declared generated outputs. A locked Windows
+file causes a clear reset error; no recursive deletion or workspace escape is
+used.
+
 Delete `data/dataset.json` and `artifacts/` to reset. Re-running the commands
 recreates identical inputs and metrics.
