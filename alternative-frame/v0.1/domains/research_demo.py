@@ -11,7 +11,11 @@ from typing import Mapping
 
 from core.agents import Agent
 from core.domains import DomainAdapter
-from core.long_horizon import AcceptanceContract, GoalCriterion
+from core.long_horizon import (
+    AcceptanceContract,
+    DeterministicGlobalEvaluator,
+    GoalCriterion,
+)
 from core.models import AgentResult, Plan, SubTask, utc_now
 from core.tools import ExperimentRunner, ShellRunner, ToolRegistry
 
@@ -157,6 +161,7 @@ class ResearchDomainAdapter(DomainAdapter):
         "artifacts/verification_metrics.json",
         "artifacts/comparison.png",
         "artifacts/research_report.md",
+        "artifacts/fault_baseline_metrics.json",
     )
 
     def register_tools(self, registry: ToolRegistry, workspace: Path) -> None:
@@ -567,6 +572,113 @@ class ResearchDomainAdapter(DomainAdapter):
             if target != workspace_path and workspace_path not in target.parents:
                 raise ValueError(f"generated path escapes workspace: {relative}")
             if target.is_file():
-                target.unlink()
+                try:
+                    target.unlink()
+                except PermissionError as exc:
+                    raise RuntimeError(
+                        f"cannot reset locked research output: {target}"
+                    ) from exc
         (workspace_path / "data").mkdir(exist_ok=True)
         (workspace_path / "artifacts").mkdir(exist_ok=True)
+
+
+class ResearchGlobalEvaluator(DeterministicGlobalEvaluator):
+    """Fail-closed content audit layered over the shared hard-evidence gate."""
+
+    def evaluate(self, state, plan, report):
+        evaluation = super().evaluate(state, plan, report)
+        if not evaluation.completed:
+            return evaluation
+        failures = self._audit_outputs()
+        if not failures:
+            return evaluation
+        evaluation.completed = False
+        evaluation.reason = "research artifact content audit did not pass"
+        evaluation.missing_criteria = list(failures)
+        evaluation.failures.extend(
+            f"{criterion}: research artifact content invalid"
+            for criterion in failures
+        )
+        evaluation.next_focus = [
+            f"repair research artifact criterion: {criterion}"
+            for criterion in failures
+        ]
+        return evaluation
+
+    def _audit_outputs(self):
+        import json
+        import math
+
+        workspace = self.hard_gate.workspace
+        failures = []
+        try:
+            baseline = json.loads(
+                (workspace / "artifacts/baseline_metrics.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            improved = json.loads(
+                (workspace / "artifacts/improved_metrics.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            verification = json.loads(
+                (workspace / "artifacts/verification_metrics.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            best = json.loads(
+                (workspace / "artifacts/best_config.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            baseline_score = float(baseline["accuracy"])
+            improved_score = float(improved["accuracy"])
+            verified_score = float(verification["accuracy"])
+            best_score = float(best["best_score"])
+            tolerance = float(verification["verification_tolerance"])
+            if not all(
+                math.isfinite(value)
+                for value in (
+                    baseline_score,
+                    improved_score,
+                    verified_score,
+                    best_score,
+                    tolerance,
+                )
+            ):
+                raise ValueError("research metrics must be finite")
+            if improved_score - baseline_score < 0.000001:
+                failures.append("improvement_delta")
+            if (
+                verification.get("verification_passed") is not True
+                or abs(verified_score - best_score) > tolerance
+            ):
+                failures.append("verification_metrics")
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            failures.extend(["baseline_metrics", "improved_metrics", "verification_metrics"])
+
+        chart = workspace / "artifacts/comparison.png"
+        try:
+            if chart.stat().st_size <= 8 or not chart.read_bytes().startswith(
+                b"\x89PNG\r\n\x1a\n"
+            ):
+                failures.append("comparison_chart")
+        except OSError:
+            failures.append("comparison_chart")
+
+        try:
+            report_text = (workspace / "artifacts/research_report.md").read_text(
+                encoding="utf-8"
+            )
+            required_text = (
+                f"{baseline_score:.6f}",
+                f"{improved_score:.6f}",
+                f"{verified_score:.6f}",
+                "Independent verification: **passed**",
+            )
+            if any(item not in report_text for item in required_text):
+                failures.append("research_report")
+        except (OSError, UnboundLocalError):
+            failures.append("research_report")
+        return list(dict.fromkeys(failures))

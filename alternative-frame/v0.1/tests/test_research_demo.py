@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from core.acceptance import AcceptanceEvaluator
+from core.agents import AgentRegistry
 from core.domains import DomainRegistry
 from core.long_horizon.contract_validator import ContractValidator
 from core.long_horizon import DeterministicGlobalEvaluator, LongHorizonState
@@ -15,7 +16,7 @@ from core.models import Plan
 from core.orchestrator import Orchestrator
 from core.preflight import HarnessPreflightChecker
 from core.tools import ToolRegistry
-from domains.research_demo import ResearchDomainAdapter
+from domains.research_demo import ResearchDomainAdapter, ResearchGlobalEvaluator
 from domains.research_tools import DatasetInspector, MetricComparator, ResearchReportBuilder
 from run_research_demo import run_demo
 
@@ -89,10 +90,46 @@ def test_reset_workspace_is_repeatable_and_preserves_fixture_sources(tmp_path):
     assert (workspace / "run_improved.py").is_file()
 
 
+def test_reset_workspace_reports_locked_output_clearly(tmp_path, monkeypatch):
+    workspace = _workspace(tmp_path)
+    locked = workspace / "data/dataset.json"
+    locked.parent.mkdir(parents=True, exist_ok=True)
+    locked.write_text("locked", encoding="utf-8")
+    original_unlink = Path.unlink
+
+    def fail_locked(path, *args, **kwargs):
+        if path.resolve() == locked.resolve():
+            raise PermissionError("simulated Windows file lock")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_locked)
+
+    try:
+        ResearchDomainAdapter().reset_workspace(workspace)
+    except RuntimeError as exc:
+        assert "cannot reset locked research output" in str(exc)
+        assert "dataset.json" in str(exc)
+    else:
+        raise AssertionError("locked generated output must stop reset")
+
+
 def test_dataset_inspector_rejects_workspace_escape(tmp_path):
     result = DatasetInspector(tmp_path).execute(
         {
             "dataset_path": "../dataset.json",
+            "output_path": "artifacts/summary.json",
+        }
+    )
+
+    assert result.success is False
+    assert "escapes workspace" in result.error
+
+
+def test_dataset_inspector_rejects_absolute_workspace_escape(tmp_path):
+    outside = (tmp_path.parent / "outside-dataset.json").resolve()
+    result = DatasetInspector(tmp_path).execute(
+        {
+            "dataset_path": str(outside),
             "output_path": "artifacts/summary.json",
         }
     )
@@ -386,6 +423,29 @@ def test_tied_improved_score_fails_delta_task_and_global_contract(tmp_path):
     assert "improvement_delta" in evaluation.missing_criteria
 
 
+def test_regressed_improved_score_fails_delta_task_and_global_contract(tmp_path):
+    workspace = _workspace(tmp_path)
+    adapter = ResearchDomainAdapter()
+    _, agents = adapter.configure(workspace)
+    orchestrator = Orchestrator(agents, acceptance=AcceptanceEvaluator(workspace))
+    goal = "reject a regressed candidate"
+    initial = orchestrator.run(adapter.build_plan(goal), parallel=False)
+    baseline_path = workspace / "artifacts/baseline_metrics.json"
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline["accuracy"] = 0.99
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    task = deepcopy(adapter.build_plan(goal).task_map()["build_initial_report"])
+    task.depends_on = []
+
+    regressed = orchestrator.run(Plan(goal, [task]), parallel=False)
+
+    assert initial.status == "success"
+    assert regressed.status == "failed"
+    assert regressed.results[task.id].tool_records[0]["metadata"]["metrics"][
+        "improvement_delta"
+    ] < 0
+
+
 def test_research_task_retries_one_controlled_transient_failure(tmp_path):
     workspace = _workspace(tmp_path)
     adapter = ResearchDomainAdapter()
@@ -493,6 +553,53 @@ def test_long_horizon_demo_rejects_phase_one_and_completes_phase_two(tmp_path):
     assert len(persisted["phases"]) == 2
 
 
+def test_two_consecutive_demo_runs_do_not_reuse_previous_evidence(tmp_path):
+    workspace = _workspace(tmp_path)
+    runs = tmp_path / "runs"
+
+    first = run_demo(workspace, runs, "research-first")
+    stale = workspace / "artifacts/verification_metrics.json"
+    stale.write_text('{"verification_passed": true, "accuracy": 1}', encoding="utf-8")
+    second = run_demo(workspace, runs, "research-second")
+
+    assert first.status == "completed"
+    assert second.status == "completed"
+    assert "verification_metrics" in second.state.phases[0].evaluation["missing_criteria"]
+    assert second.state.run_id == "research-second"
+    assert all(
+        "research-first" not in json.dumps(record)
+        for record in second.state.evidence_records
+    )
+
+
+def test_empty_chart_and_report_without_real_metrics_revoke_completion(tmp_path):
+    workspace = _workspace(tmp_path)
+    runs = tmp_path / "runs"
+    adapter = ResearchDomainAdapter()
+    report = run_demo(workspace, runs, "research-content-audit")
+    plan = adapter.build_recovery_plan(report.state.goal)
+    phase_report = report.phase_reports[-1]
+
+    (workspace / "artifacts/comparison.png").write_bytes(b"")
+    empty_chart = ResearchGlobalEvaluator(
+        adapter.build_contract(report.state.goal), workspace
+    ).evaluate(report.state, plan, phase_report)
+    assert empty_chart.completed is False
+    assert "comparison_chart" in empty_chart.missing_criteria
+
+    (workspace / "artifacts/comparison.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"content"
+    )
+    (workspace / "artifacts/research_report.md").write_text(
+        "# report without metrics", encoding="utf-8"
+    )
+    bad_report = ResearchGlobalEvaluator(
+        adapter.build_contract(report.state.goal), workspace
+    ).evaluate(report.state, plan, phase_report)
+    assert bad_report.completed is False
+    assert "research_report" in bad_report.missing_criteria
+
+
 def test_run_demo_task_retry_repairs_command_from_feedback(tmp_path):
     workspace = _workspace(tmp_path)
     runs = tmp_path / "runs"
@@ -590,6 +697,32 @@ def test_metric_comparator_rejects_workspace_escape(tmp_path):
     assert "escapes workspace" in result.error
 
 
+def test_metric_comparator_rejects_non_numeric_required_metric(tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    common = {
+        "dataset_version": "v1",
+        "seed": 1,
+        "metric_name": "accuracy",
+        "features_used": ["x1"],
+    }
+    for name, value in (("a.json", 0.8), ("b.json", "not-a-number")):
+        payload = {**common, "experiment": name, "accuracy": value}
+        (artifacts / name).write_text(json.dumps(payload), encoding="utf-8")
+
+    result = MetricComparator(tmp_path).execute(
+        {
+            "metric_files": ["artifacts/a.json", "artifacts/b.json"],
+            "primary_metric": "accuracy",
+            "mode": "max",
+            "output_path": "artifacts/best.json",
+        }
+    )
+
+    assert result.success is False
+    assert "invalid numeric metric" in result.error
+
+
 def test_report_builder_rejects_workspace_escape(tmp_path):
     result = ResearchReportBuilder(tmp_path).execute(
         {
@@ -604,6 +737,48 @@ def test_report_builder_rejects_workspace_escape(tmp_path):
 
     assert result.success is False
     assert "escapes workspace" in result.error
+
+
+def test_research_preflight_rejects_missing_roles_and_tools(tmp_path):
+    adapter = ResearchDomainAdapter()
+    plan = adapter.build_plan("preflight must fail closed")
+    report = HarnessPreflightChecker().check(
+        domains=DomainRegistry([adapter]),
+        domain="research",
+        plan=plan,
+        agents=AgentRegistry(),
+        tools=ToolRegistry(),
+        workspace=tmp_path,
+        contract=adapter.build_contract(plan.goal),
+    )
+
+    assert report.ready is False
+    assert {issue.code for issue in report.issues} >= {
+        "missing_agent_roles",
+        "missing_tools",
+    }
+
+
+def test_persistent_research_fault_stops_after_local_recovery_budget(tmp_path):
+    workspace = _workspace(tmp_path)
+    adapter = ResearchDomainAdapter()
+    _, agents = adapter.configure(workspace)
+    plan = adapter.build_plan("persistent controlled failure")
+    improved = plan.task_map()["run_improved"]
+    improved.max_retries = 0
+    improved.metadata["fault_injection"] = {
+        "enabled": True,
+        "id": "persistent-improved-failure",
+        "fail_attempts": 5,
+    }
+    outcome = LocalDAGRecoveryController(
+        Orchestrator(agents, acceptance=AcceptanceEvaluator(workspace)),
+        max_cycles=1,
+    ).run(plan, task_budget=12)
+
+    assert outcome.report.status == "failed"
+    assert outcome.cycles == 1
+    assert outcome.executed_tasks == 9
 
 
 def test_baseline_is_reproducible_with_fixed_seed(tmp_path):

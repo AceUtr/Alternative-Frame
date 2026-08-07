@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import struct
 import zlib
 from pathlib import Path
@@ -78,10 +79,15 @@ class ResearchReportBuilder(Tool):
                 raise ValueError("report metrics use different seeds")
             baseline_score = float(baseline["accuracy"])
             improved_score = float(improved["accuracy"])
+            if not math.isfinite(baseline_score) or not math.isfinite(improved_score):
+                raise ValueError("report accuracy metrics must be finite")
             scores = [baseline_score, improved_score]
             labels = [baseline["experiment"], improved["experiment"]]
             if verification is not None:
-                scores.append(float(verification["accuracy"]))
+                verification_score = float(verification["accuracy"])
+                if not math.isfinite(verification_score):
+                    raise ValueError("verification accuracy must be finite")
+                scores.append(verification_score)
                 labels.append("independent_verification")
             self._write_chart(chart_path, scores)
             delta = improved_score - baseline_score
