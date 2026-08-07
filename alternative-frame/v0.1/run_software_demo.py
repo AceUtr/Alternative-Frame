@@ -1,13 +1,37 @@
 from pathlib import Path
+import difflib
+
+from core.main_agent import MainAgent
+
+from core.orchestrator import Orchestrator
+
+from domains.software_demo import SoftwareDomainAdapter
+
+from core.acceptance import AcceptanceEvaluator
 
 from core.models import AgentResult
-from core.agents import (
-    DeterministicAgent,
-    AgentRegistry
-)
+from core.agents import DeterministicAgent
 
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+
+
+# =====================================================
+# Evidence Storage
+# =====================================================
+
+BEFORE_CODE = ""
+AFTER_CODE = ""
+
+TEST_OUTPUT = ""
+TEST_EXIT_CODE = None
+
+
+
+# =====================================================
+# Workspace
+# =====================================================
+
+ROOT_DIR = Path(__file__).parent
 
 
 PROJECT = (
@@ -29,6 +53,12 @@ TEST_FILE = (
     "tests" /
     "test_app.py"
 )
+
+
+
+# =====================================================
+# Software Agent Handler
+# =====================================================
 
 def software_handler(task, context):
 
@@ -1080,30 +1110,201 @@ examples/software_task/src/app.py
 {BEFORE_CODE}
 """
 
-def build_software_agents():
+def main():
 
-    registry = AgentRegistry()
-
-
-    roles=[
-        "analyst",
-        "architect",
-        "developer",
-        "tester",
-        "reviewer",
-        "reporter"
-    ]
+    from pathlib import Path
 
 
-    for role in roles:
+    # =====================================
+    # 1. Workspace
+    # =====================================
 
-        registry.register(
+    ROOT = Path(__file__).resolve().parent
 
-            DeterministicAgent(
-                role=role,
-                handler=software_handler
-            )
+    workspace = (
+        ROOT /
+        "examples" /
+        "software_task"
+    )
 
+
+    # =====================================
+    # 2. 创建领域 Adapter
+    # =====================================
+
+    adapter = SoftwareDomainAdapter()
+
+
+
+    # =====================================
+    # 3. 配置领域工具
+    # =====================================
+
+    tools, agent_registry = adapter.configure(
+        workspace=workspace
+    )
+
+
+
+    # =====================================
+    # 4. 注册 Agent
+    # =====================================
+
+   
+
+
+
+    # =====================================
+    # 5. Orchestrator
+    # =====================================
+
+    acceptance = AcceptanceEvaluator(
+        workspace=workspace
+    )
+
+
+    orchestrator = Orchestrator(
+
+        registry=agent_registry,
+
+        acceptance=acceptance,
+
+        tools=tools
+
+    )
+
+
+
+    # =====================================
+    # 6. Main Agent
+    # =====================================
+
+    agent = MainAgent(
+
+        orchestrator,
+
+        planner=adapter.build_plan
+
+    )
+
+
+
+    # =====================================
+    # 7. Goal
+    # =====================================
+
+    goal = """
+Analyze software project,
+locate bugs,
+modify source code,
+run regression tests,
+generate evidence report.
+"""
+
+
+
+    # =====================================
+    # 8. Build Plan
+    # =====================================
+
+    plan = adapter.build_plan(goal)
+
+
+
+    # =====================================
+    # 9. Execute Agent
+    # =====================================
+
+    report = agent.execute(plan)
+
+
+
+    # =====================================
+    # 10. Output Report
+    # =====================================
+
+    print(
+        "\n========== REPORT =========="
+    )
+
+
+    print(
+        "Status:",
+        report.status
+    )
+
+
+    print(
+        "\nTasks:"
+    )
+
+
+
+    for task_id, result in report.results.items():
+
+        print(
+            "\n================"
         )
 
-    return registry
+
+        print(
+            "Task:",
+            task_id
+        )
+
+
+        print(
+            "Status:",
+            result.status
+        )
+
+
+        print(
+            "Summary:",
+            result.summary
+        )
+
+
+        print(
+            "Failures:"
+        )
+
+
+        for failure in result.failures:
+
+            print(
+                " -",
+                failure
+            )
+
+
+        print(
+            "Evidence:"
+        )
+
+
+        for evidence in result.evidence:
+
+            print(
+                " -",
+                evidence
+            )
+
+
+        print(
+            "Artifacts:"
+        )
+
+
+        for artifact in result.artifacts:
+
+            print(
+                " -",
+                artifact
+            )
+
+
+
+if __name__ == "__main__":
+
+    main()
