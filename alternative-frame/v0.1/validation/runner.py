@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -219,8 +220,9 @@ class ContributionValidator:
             env = dict(os.environ)
             env["PYTHONDONTWRITEBYTECODE"] = "1"
             try:
+                runtime_command = self._with_current_python(command)
                 completed = subprocess.run(
-                    command,
+                    runtime_command,
                     cwd=self.root,
                     capture_output=True,
                     text=True,
@@ -238,6 +240,12 @@ class ContributionValidator:
                 status, detail, ok = "failed", f"{type(exc).__name__}: {exc}", False
             report.checks.append(ValidationCheck(f"{category}:{index}", category, status, detail, time.perf_counter() - started))
         return ok
+
+    @staticmethod
+    def _with_current_python(command):
+        if command and command[0].lower() in {"python", "python3", "py"}:
+            return [sys.executable, *command[1:]]
+        return command
 
     @staticmethod
     def _validate_manifest(manifest):
