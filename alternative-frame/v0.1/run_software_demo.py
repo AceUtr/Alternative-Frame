@@ -1,1310 +1,179 @@
+from __future__ import annotations
+
+import argparse
+from datetime import datetime
 from pathlib import Path
-import difflib
-
-from core.main_agent import MainAgent
-
-from core.orchestrator import Orchestrator
-
-from domains.software_demo import SoftwareDomainAdapter
 
 from core.acceptance import AcceptanceEvaluator
-
-from core.models import AgentResult
-from core.agents import DeterministicAgent
-
-
-
-
-# =====================================================
-# Evidence Storage
-# =====================================================
-
-BEFORE_CODE = ""
-AFTER_CODE = ""
-
-TEST_OUTPUT = ""
-TEST_EXIT_CODE = None
-
-
-
-# =====================================================
-# Workspace
-# =====================================================
-
-ROOT_DIR = Path(__file__).parent
-
-
-PROJECT = (
-    ROOT_DIR /
-    "examples" /
-    "software_task"
-)
-
-
-APP_FILE = (
-    PROJECT /
-    "src" /
-    "app.py"
-)
-
-
-TEST_FILE = (
-    PROJECT /
-    "tests" /
-    "test_app.py"
-)
-
-
-
-# =====================================================
-# Software Agent Handler
-# =====================================================
-
-def software_handler(task, context):
-
-    global BEFORE_CODE
-    global AFTER_CODE
-    global TEST_OUTPUT
-    global TEST_EXIT_CODE
-
-
-    print("\n==============================")
-    print("[Agent executing]")
-    print("Role:", task.role)
-    print("Task:", task.description)
-    print("==============================")
-
-
-
-    # =================================================
-    # Analyst
-    # =================================================
-
-    if task.role == "analyst":
-
-        with open(
-            APP_FILE,
-            "r",
-            encoding="utf8"
-        ) as f:
-
-            code = f.read()
-
-
-        print("\nCurrent Code:")
-        print(code)
-
-
-
-        analysis = """
-            Requirement Analysis:
-
-            Function:
-
-            add(a,b)
-
-
-            Expected behavior:
-
-            Return the sum of two numbers.
-
-
-            Detected problem:
-
-            Current implementation violates requirement.
-        """
-
-
-        print(analysis)
-
-
-
-        analysis_file = (
-            PROJECT /
-            "artifacts" /
-            "requirement_analysis.md"
-        )
-
-
-        analysis_file.parent.mkdir(
-            exist_ok=True
-        )
-
-
-        analysis_file.write_text(
-
-            analysis,
-
-            encoding="utf8"
-
-        )
-
-
-        artifact_dir = PROJECT / "artifacts"
-
-        artifact_dir.mkdir(
-            exist_ok=True
-        )
-
-
-        requirement_file = (
-            artifact_dir /
-            "requirement_analysis.md"
-        )
-
-
-        requirement_file.write_text(
-        analysis,
-        encoding="utf8"
-)
-
-
-
-        return AgentResult(
-
-            subtask_id=task.id,
-
-            status="success",
-
-            summary=analysis,
-
-            artifacts=[
-
-                str(requirement_file)
-
-            ],
-
-            evidence=[
-
-                {
-
-                "type":
-                "artifact",
-
-                "path":
-                str(requirement_file),
-
-                "exists":
-                True
-                },
-
-                "requirement_analysis_generated"
-
-            ]
-        )
-
-
-    # =================================================
-    # Architect
-    # =================================================
-
-    elif task.role == "architect":
-
-
-        architecture = """
-System Architecture:
-
-Input
-
-|
-
-v
-
-Business Logic(add)
-
-|
-
-v
-
-Automated Test Validation
-
-
-
-Components:
-
-- Application Module
-- Business Logic
-- Test Framework
-"""
-
-
-        print(architecture)
-
-
-
-    # =====================================
-    # Generate architecture artifact
-    # =====================================
-
-
-        artifact_dir = (
-
-        PROJECT /
-        "artifacts"
-
+from core.domains import DomainRegistry
+from core.local_recovery import LocalDAGRecoveryController
+from core.long_horizon import LongHorizonController, LongHorizonStore
+from core.long_horizon.global_evaluator import DeterministicGlobalEvaluator
+from core.main_agent import MainAgent
+from core.orchestrator import Orchestrator
+from core.preflight import HarnessPreflightChecker
+from domains.software_demo import SoftwareDomainAdapter
+
+
+GOAL = "Repair the supplied buggy application and prove the exact test command passes"
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Run the software engineering demo.")
+    parser.add_argument(
+        "--single-phase",
+        action="store_true",
+        help="Run the one-phase smoke DAG used for local debugging.",
     )
-
-
-        artifact_dir.mkdir(
-
-            exist_ok=True
-
-        )
-
-
-
-        architecture_file = (
-
-        artifact_dir /
-        "architecture_design.md"
-
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Optional long-horizon run id. Defaults to a timestamped software-demo id.",
     )
-
-
-
-        architecture_file.write_text(
-
-        architecture,
-
-        encoding="utf8"
-
+    parser.add_argument(
+        "--fault-scenario",
+        choices=("none", "local-recovery"),
+        default="none",
+        help="Optional controlled fault injection scenario for recovery demonstrations.",
     )
+    return parser.parse_args(argv)
 
 
-
-        return AgentResult(
-
-
-        subtask_id=task.id,
-
-
-        status="success",
-
-
-        summary=architecture,
-
-
-        artifacts=[
-
-            str(architecture_file)
-
-        ],
-
-
-        evidence=[
-
-            {"type":
-            "artifact",
-
-            "path":
-            str(architecture_file),
-
-            "exists":
-            True
-        },
-
-        "architecture_design_generated"
-                
-        ],
-
-
-        tool_records=[]
-
-    )
-
-    # =================================================
-    # Reviewer
-    # =================================================
-
-    elif task.role == "reviewer":
-
-
-        with open(
-            APP_FILE,
-            "r",
-            encoding="utf8"
-        ) as f:
-
-            code = f.read()
-
-
-
-        if (
-            "return a-b" in code
-            or
-            "return b-a" in code
-        ):
-
-
-            review = """
-Code Review Result:
-
-
-Bug:
-
-Function add() uses subtraction.
-
-
-Expected:
-
-return a+b
-
-
-Solution:
-
-Replace subtraction operator.
-"""
-
-
-        else:
-
-
-            review = """
-Code Review Result:
-
-
-No bug detected.
-"""
-
-
-
-        print(review)
-
-
-
-        return AgentResult(
-
-            subtask_id=task.id,
-
-            status="success",
-
-            summary=review
-
-        )
-
-
-
-    # =================================================
-    # Developer
-    # =================================================
-
-    elif task.role == "developer":
-
-
-        with open(
-            APP_FILE,
-            "r",
-            encoding="utf8"
-        ) as f:
-
-            code = f.read()
-
-
-
-        BEFORE_CODE = code
-
-
-
-        print("\nBefore:")
-        print(code)
-
-
-
-        attempt = task.metadata.get(
-            "runtime_attempt",
-            1
-        )
-
-
-        retry_feedback = task.metadata.get(
-            "retry_feedback"
-        )
-
-
-        print(
-            "\nDeveloper attempt:",
-            attempt
-        )
-
-
-
-        if retry_feedback:
-
-            print(
-                "\nRetry feedback:"
-            )
-
-            print(
-                retry_feedback
-            )
-
-
-
-        # =============================================
-        # First attempt
-        # simulate imperfect implementation
-        # =============================================
-
-        if attempt == 1:
-
-
-            code = code.replace(
-                "return a-b",
-                "return a*b"
-            )
-
-
-            code = code.replace(
-                "return b-a",
-                "return a*b"
-            )
-
-
-            print(
-                "\nFirst attempt generated wrong implementation."
-            )
-
-
-
-        # =============================================
-        # Retry attempt
-        # =============================================
-
-        else:
-
-
-            code = code.replace(
-                "return a-b",
-                "return a+b"
-            )
-
-
-            code = code.replace(
-                "return b-a",
-                "return a+b"
-            )
-
-
-            code = code.replace(
-                "return a*b",
-                "return a+b"
-            )
-
-
-            print(
-                "\nRetry fixed implementation."
-            )
-
-
-
-        with open(
-            APP_FILE,
-            "w",
-            encoding="utf8"
-        ) as f:
-
-            f.write(code)
-
-
-
-        AFTER_CODE = code
-
-
-
-        print("\nAfter:")
-        print(code)
-
-
-
-        # =============================================
-        # Developer verification
-        # =============================================
-
-        print(
-            "\nDeveloper running verification test..."
-        )
-
-
-        command = (
-            f"pytest {TEST_FILE} -v"
-        )
-
-
-
-        tool_result = context["tools"].execute(
-
-            "test_runner",
-
-            {
-                "command": command
-            }
-
-        )
-
-
-
-        test_output = tool_result.output
-
-        test_exit_code = tool_result.exit_code
-
-
-
-        print("\nTEST RESULT:")
-
-        print(test_output)
-
-
-
-        test_success = (
-            test_exit_code == 0
-        )
-
-
-        # 保存测试证据
-
-        TEST_OUTPUT = test_output
-
-        TEST_EXIT_CODE = test_exit_code
-
-
-
-        if test_success:
-
-
-            return AgentResult(
-
-                subtask_id=task.id,
-
-                status="success",
-
-                summary="Source code modified and verified",
-
-
-                artifacts=[
-
-                    str(APP_FILE)
-
-                ],
-
-
-                evidence=[
-
-                    "developer_completed",
-
-                    "tool=test_runner;success=True",
-
-                    "implementation_test_passed"
-
-                ],
-
-
-                tool_records=[
-
-                    {
-
-                        "tool":
-                        "test_runner",
-
-
-                        "arguments":
-
-                        {
-
-                            "command": command
-
-                        },
-
-
-                        "success": True,
-
-
-                        "exit_code":
-                        test_exit_code,
-
-
-                        "metadata":
-
-                        {
-
-                            "artifacts":
-
-                            [
-
-                                str(APP_FILE)
-
-                            ]
-
-                        }
-
-                    }
-
-                ]
-
-            )
-
-
-
-        else:
-
-
-            return AgentResult(
-
-                subtask_id=task.id,
-
-
-                status="failed",
-
-
-                summary="Source code modified but verification failed",
-
-
-                artifacts=[
-
-                    str(APP_FILE)
-
-                ],
-
-
-                failures=[
-
-                    test_output
-
-                ],
-
-
-                evidence=[
-
-                    "developer_completed",
-
-                    "tool=test_runner;success=False",
-
-                    "implementation_test_failed"
-
-                ],
-
-
-                tool_records=[
-
-                    {
-
-                        "tool":
-                        "test_runner",
-
-
-                        "arguments":
-
-                        {
-
-                            "command": command
-
-                        },
-
-
-                        "success": False,
-
-
-                        "exit_code":
-                        test_exit_code,
-
-
-                        "metadata":
-
-                        {
-
-                            "artifacts":
-
-                            [
-
-                                str(APP_FILE)
-
-                            ]
-
-                        }
-
-                    }
-
-                ]
-
-            )
-
-        # =================================================
-    # Tester
-    # =================================================
-
-    elif task.role == "tester":
-
-
-        print("Running tests...")
-
-
-        command = (
-            f"pytest {TEST_FILE} -v"
-        )
-
-
-
-        # =============================================
-        # 使用 TestRunner 执行真实测试
-        # =============================================
-
-        tool_result = context["tools"].execute(
-
-            "test_runner",
-
-            {
-                "command": command
-            }
-
-        )
-
-
-
-        TEST_OUTPUT = tool_result.output
-
-        TEST_EXIT_CODE = tool_result.exit_code
-
-
-
-        print(TEST_OUTPUT)
-
-
-
-        test_success = (
-
-            TEST_EXIT_CODE == 0
-
-        )
-
-
-
-        if test_success:
-
-
-            return AgentResult(
-
-                subtask_id=task.id,
-
-                status="success",
-
-                summary="Regression tests passed",
-
-
-                artifacts=[
-
-                    str(TEST_FILE)
-
-                ],
-
-
-                evidence=[
-
-                    {
-
-                        "type":
-                        "command_execution",
-
-
-                        "command":
-                        command,
-
-
-                        "exit_code":
-                        TEST_EXIT_CODE,
-
-
-                        "passed":
-                        True
-
-                    },
-
-
-                    {
-
-                        "type":
-                        "test_result",
-
-
-                        "framework":
-                        "pytest",
-
-
-                        "tests_passed":
-                        True
-
-                    }
-
-                ],
-
-
-                tool_records=[
-
-                    {
-
-                        "tool":
-                        "test_runner",
-
-
-                        "arguments":
-
-                        {
-
-                            "command":
-                            command
-
-                        },
-
-
-                        "success":
-                        True,
-
-
-                        "exit_code":
-                        TEST_EXIT_CODE,
-
-
-                        "output_summary":
-                        TEST_OUTPUT[-1000:]
-
-                    }
-
-                ]
-
-            )
-
-
-
-        else:
-
-
-            return AgentResult(
-
-                subtask_id=task.id,
-
-
-                status="failed",
-
-
-                summary="Regression tests failed",
-
-
-                artifacts=[
-
-                    str(TEST_FILE)
-
-                ],
-
-
-                failures=[
-
-                    TEST_OUTPUT
-
-                ],
-
-
-                evidence=[
-
-                    {
-
-                        "type":
-                        "command_execution",
-
-
-                        "command":
-                        command,
-
-
-                        "exit_code":
-                        TEST_EXIT_CODE,
-
-
-                        "passed":
-                        False
-
-                    },
-
-
-                    {
-
-                        "type":
-                        "test_result",
-
-
-                        "framework":
-                        "pytest",
-
-
-                        "tests_passed":
-                        False,
-
-
-                        "failure_log":
-                        TEST_OUTPUT[-2000:]
-
-                    }
-
-                ],
-
-
-                tool_records=[
-
-                    {
-
-                        "tool":
-                        "test_runner",
-
-
-                        "arguments":
-
-                        {
-
-                            "command":
-                            command
-
-                        },
-
-
-                        "success":
-                        False,
-
-
-                        "exit_code":
-                        TEST_EXIT_CODE,
-
-
-                        "output_summary":
-                        TEST_OUTPUT[-1000:]
-
-                    }
-
-                ]
-
-            )
-
-
-
-    # =================================================
-    # Reporter
-    # =================================================
-
-    elif task.role == "reporter":
-
-        import difflib
-
-
-        artifact_dir = (
-            PROJECT /
-            "artifacts"
-        )
-
-
-        artifact_dir.mkdir(
-            exist_ok=True
-        )
-
-
-
-        report_file = (
-            artifact_dir /
-            "software_report.md"
-        )
-
-
-        diff_file = (
-            artifact_dir /
-            "code_diff.patch"
-        )
-
-
-        test_log_file = (
-            artifact_dir /
-            "test_log.txt"
-        )
-
-
-
-        test_success = (
-            TEST_EXIT_CODE == 0
-        )
-
-
-        status = (
-            "PASS"
-            if test_success
-            else "FAILED"
-        )
-
-
-
-    # ==========================
-    # Generate code diff
-    # ==========================
-
-        diff = "\n".join(
-
-            difflib.unified_diff(
-
-                BEFORE_CODE.splitlines(),
-
-                AFTER_CODE.splitlines(),
-
-                fromfile="before/app.py",
-
-                tofile="after/app.py",
-
-                lineterm=""
-
-            )
-
-            )
-
-
-        diff_file.write_text(
-
-            diff,
-
-            encoding="utf8"
-
-        )
-
-
-
-    # ==========================
-    # Save test log
-    # ==========================
-
-        test_log_file.write_text(
-
-            TEST_OUTPUT,
-
-            encoding="utf8"
-
-        )
-
-
-
-    # ==========================
-    # Generate markdown report
-    # ==========================
-
-    content = f"""
-# Software Engineering Agent Report
-
-
-## Execution Evidence
-
-Status:
-
-{status}
-
-
-
-## Modified File
-
-examples/software_task/src/app.py
-
-
-
-## Code Before
-
-```python
-{BEFORE_CODE}
-"""
-
-def main():
-
-    from pathlib import Path
-
-
-    # =====================================
-    # 1. Workspace
-    # =====================================
-
-    ROOT = Path(__file__).resolve().parent
-
-    workspace = (
-        ROOT /
-        "examples" /
-        "software_task"
-    )
-
-
-    # =====================================
-    # 2. 创建领域 Adapter
-    # =====================================
-
+def configure(root: Path):
+    workspace = root / "examples" / "software_task"
     adapter = SoftwareDomainAdapter()
+    adapter.reset_workspace(workspace)
+    tools, agents = adapter.configure(workspace=workspace)
+    contract = adapter.build_contract(GOAL)
+    return adapter, workspace, tools, agents, contract
 
 
+def run_preflight(adapter, workspace, tools, agents, plan, contract):
+    report = HarnessPreflightChecker().check(
+        domains=DomainRegistry([adapter]),
+        domain=adapter.name,
+        plan=plan,
+        agents=agents,
+        tools=tools,
+        workspace=workspace,
+        contract=contract,
+    )
+    report.require_ready()
 
-    # =====================================
-    # 3. 配置领域工具
-    # =====================================
 
-    tools, agent_registry = adapter.configure(
-        workspace=workspace
+def build_orchestrator(agents, tools, workspace):
+    return Orchestrator(
+        registry=agents,
+        acceptance=AcceptanceEvaluator(workspace),
+        tools=tools,
     )
 
 
+def run_single_phase(root: Path) -> int:
+    adapter, workspace, tools, agents, contract = configure(root)
+    plan = adapter.build_plan(GOAL)
+    run_preflight(adapter, workspace, tools, agents, plan, contract)
 
-    # =====================================
-    # 4. 注册 Agent
-    # =====================================
+    orchestrator = build_orchestrator(agents, tools, workspace)
+    report = MainAgent(orchestrator, planner=adapter.build_plan).execute(GOAL)
 
-   
-
-
-
-    # =====================================
-    # 5. Orchestrator
-    # =====================================
-
-    acceptance = AcceptanceEvaluator(
-        workspace=workspace
-    )
-
-
-    orchestrator = Orchestrator(
-
-        registry=agent_registry,
-
-        acceptance=acceptance,
-
-        tools=tools
-
-    )
+    print("\n========== SOFTWARE DEMO REPORT ==========")
+    print("Mode: single-phase smoke")
+    print("Status:", report.status)
+    print("Rounds:", report.rounds)
+    print_task_report(report)
+    print("\nReport artifact:", workspace / "artifacts" / "software_report.md")
+    return 0 if report.status == "success" else 1
 
 
+def apply_fault_scenario(plan, scenario: str):
+    if scenario == "local-recovery":
+        for task in plan.subtasks:
+            if task.id == "run_targeted_tests":
+                task.metadata["fault_scenario"] = "local-recovery"
+    return plan
 
-    # =====================================
-    # 6. Main Agent
-    # =====================================
 
-    agent = MainAgent(
+def run_two_phase(root: Path, run_id: str | None = None, fault_scenario: str = "none") -> int:
+    adapter, workspace, tools, agents, contract = configure(root)
+    if fault_scenario == "local-recovery":
+        initial_plan = apply_fault_scenario(adapter.build_plan(GOAL), fault_scenario)
+    else:
+        initial_plan = adapter.build_initial_plan(GOAL)
+    run_preflight(adapter, workspace, tools, agents, initial_plan, contract)
 
+    orchestrator = build_orchestrator(agents, tools, workspace)
+    evaluator = DeterministicGlobalEvaluator(contract, workspace)
+    store = LongHorizonStore(root / "runs" / "long_horizon")
+    actual_run_id = run_id or f"software-demo-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+    def initial_planner(_state):
+        if fault_scenario == "local-recovery":
+            return apply_fault_scenario(adapter.build_plan(GOAL), fault_scenario)
+        return adapter.build_initial_plan(GOAL)
+
+    def replanner(_state, evaluation):
+        return adapter.build_recovery_plan(GOAL, evaluation.missing_criteria)
+
+    controller = LongHorizonController(
         orchestrator,
-
-        planner=adapter.build_plan
-
+        initial_planner=initial_planner,
+        store=store,
+        evaluator=evaluator,
+        replanner=replanner,
+        max_phases=2,
+        max_total_tasks=16,
+        acceptance_contract=contract.to_dict(),
+        local_recovery=(
+            LocalDAGRecoveryController(orchestrator, max_cycles=1)
+            if fault_scenario == "local-recovery"
+            else None
+        ),
     )
+    report = controller.run(GOAL, run_id=actual_run_id)
+
+    print("\n========== SOFTWARE LONG-HORIZON DEMO REPORT ==========")
+    print("Mode: two-phase long-horizon")
+    print("Fault scenario:", fault_scenario)
+    print("Status:", report.status)
+    print("Run id:", report.state.run_id)
+    print("Phase count:", report.state.phase)
+    for phase, phase_report in zip(report.state.phases, report.phase_reports):
+        print(f"\n[phase {phase.number}] report={phase.report_status} state={phase.status}")
+        print("Tasks:", ", ".join(phase.task_ids))
+        print("Local recovery cycles:", phase.local_recovery_cycles)
+        print("Executed task count:", phase.executed_task_count)
+        print("Missing criteria:", ", ".join(phase.evaluation.get("missing_criteria", [])) or "none")
+        print_task_report(phase_report)
+
+    run_dir = store.run_dir(report.state.run_id)
+    print("\nState:", run_dir / "state.json")
+    print("Events:", run_dir / "events.jsonl")
+    print("Report artifact:", workspace / "artifacts" / "software_report.md")
+    return 0 if report.status == "completed" else 1
 
 
-
-    # =====================================
-    # 7. Goal
-    # =====================================
-
-    goal = """
-Analyze software project,
-locate bugs,
-modify source code,
-run regression tests,
-generate evidence report.
-"""
-
-
-
-    # =====================================
-    # 8. Build Plan
-    # =====================================
-
-    plan = adapter.build_plan(goal)
-
-
-
-    # =====================================
-    # 9. Execute Agent
-    # =====================================
-
-    report = agent.execute(plan)
-
-
-
-    # =====================================
-    # 10. Output Report
-    # =====================================
-
-    print(
-        "\n========== REPORT =========="
-    )
-
-
-    print(
-        "Status:",
-        report.status
-    )
-
-
-    print(
-        "\nTasks:"
-    )
-
-
-
+def print_task_report(report):
     for task_id, result in report.results.items():
-
-        print(
-            "\n================"
-        )
-
-
-        print(
-            "Task:",
-            task_id
-        )
-
-
-        print(
-            "Status:",
-            result.status
-        )
+        print(f"\n[{task_id}] {result.status} attempts={result.attempts}")
+        print(result.summary)
+        if result.failures:
+            print("Failures:")
+            for failure in result.failures:
+                print(" -", str(failure).splitlines()[0])
+        if result.artifacts:
+            print("Artifacts:")
+            for artifact in result.artifacts:
+                print(" -", artifact)
 
 
-        print(
-            "Summary:",
-            result.summary
-        )
-
-
-        print(
-            "Failures:"
-        )
-
-
-        for failure in result.failures:
-
-            print(
-                " -",
-                failure
-            )
-
-
-        print(
-            "Evidence:"
-        )
-
-
-        for evidence in result.evidence:
-
-            print(
-                " -",
-                evidence
-            )
-
-
-        print(
-            "Artifacts:"
-        )
-
-
-        for artifact in result.artifacts:
-
-            print(
-                " -",
-                artifact
-            )
-
+def main(argv=None) -> int:
+    args = parse_args(argv)
+    root = Path(__file__).resolve().parent
+    if args.single_phase:
+        return run_single_phase(root)
+    return run_two_phase(root, args.run_id, args.fault_scenario)
 
 
 if __name__ == "__main__":
-
-    main()
+    raise SystemExit(main())
