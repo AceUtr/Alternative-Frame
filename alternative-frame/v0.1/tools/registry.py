@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+from typing import Any
 
 
 class ToolRegistry:
@@ -16,19 +17,22 @@ class ToolRegistry:
     def execute(
         self,
         tool_name: str,
-        **kwargs
-    ):
+        **kwargs: Any
+    ) -> dict[str, Any]:
 
         if tool_name == "test_runner":
 
             command = kwargs.get(
                 "command"
             )
+            if not isinstance(command, str) or not command.strip():
+                raise ValueError("test_runner requires a non-empty string command")
 
-            cwd = kwargs.get(
+            cwd_arg = kwargs.get(
                 "cwd",
                 "."
             )
+            cwd = Path(cwd_arg)
 
 
             result = subprocess.run(
