@@ -1,1 +1,10 @@
+{
+  "include": [
+    "Alternative-Frame-feature-software-demo/tests",
+    "Alternative-Frame-feature-software-demo/alternative-frame/v0.1"
+  ],
+  "extraPaths": [
+    "Alternative-Frame-feature-software-demo/alternative-frame/v0.1"
+  ]
+}
 
