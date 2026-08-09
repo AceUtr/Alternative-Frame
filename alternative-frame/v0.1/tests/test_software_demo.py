@@ -243,4 +243,3 @@ def test_contract_rejects_existing_regression_test_without_run_provenance(tmp_pa
     assert report.passed is False
     assert "regression_tests_exist" in failed_contract_criteria(report)
     assert any("test_app.py" in failure and "no artifact provenance" in failure for failure in report.failures)
-
