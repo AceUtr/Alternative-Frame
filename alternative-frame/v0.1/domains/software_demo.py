@@ -67,7 +67,7 @@ class SoftwareDomainAdapter(DomainAdapter):
         registry.register(TestRunner(shell_runner))
 
     def build_agents(self, model_client, tools):
-        registry = build_software_agents()
+        registry = build_software_agents(tools)
         return [registry.get(role) for role in registry.roles()]
 
     def _inspect_requirements_task(self) -> SubTask:
@@ -301,9 +301,16 @@ class SoftwareDomainAdapter(DomainAdapter):
     def reset_workspace(self, workspace):
         workspace = Path(workspace)
         workspace.mkdir(parents=True, exist_ok=True)
+
         artifacts = workspace / "artifacts"
         if artifacts.exists():
             shutil.rmtree(artifacts)
+
+        for stale_dir in ("src", "tests"):
+            stale_path = workspace / stale_dir
+            if stale_path.exists():
+                shutil.rmtree(stale_path)
+
         artifacts.mkdir(parents=True, exist_ok=True)
         (workspace / "app.py").write_text(INITIAL_APP, encoding="utf-8")
         (workspace / "test_app.py").write_text(TEST_APP, encoding="utf-8")
