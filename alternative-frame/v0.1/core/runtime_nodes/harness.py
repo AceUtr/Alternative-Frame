@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from threading import Lock
 from typing import Callable, Iterable, Mapping
 
 from core.agents import Agent
@@ -11,6 +12,19 @@ from .executor import RuntimeExecutor
 
 
 NodeProvider = Iterable[ExecutionNode] | Callable[[SubTask], Iterable[ExecutionNode]]
+
+
+class LongHorizonEventSink:
+    """Thread-safe bridge from runtime events to LongHorizonStore.events.jsonl."""
+
+    def __init__(self, store, run_id: str) -> None:
+        self.store = store
+        self.run_id = run_id
+        self._lock = Lock()
+
+    def __call__(self, event: str, payload: dict) -> None:
+        with self._lock:
+            self.store.append_event(self.run_id, event, payload)
 
 
 class NodeRoutedAgent(Agent):
@@ -76,4 +90,4 @@ class NodeRoutedAgent(Agent):
         return result
 
 
-__all__ = ["NodeRoutedAgent"]
+__all__ = ["LongHorizonEventSink", "NodeRoutedAgent"]
