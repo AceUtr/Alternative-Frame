@@ -18,34 +18,74 @@ class ShellRunner(Tool):
         self.max_output = max_output
 
     def schema(self) -> Dict[str, Any]:
-        return {"type": "function", "function": {"name": "shell_runner", "description": "Run a command inside the workspace with timeout", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}
+        return {
+            "type": "function",
+            "function": {
+                "name": "shell_runner",
+                "description": "Run a command inside the workspace with timeout",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string"},
+                    },
+                    "required": ["command"],
+                },
+            },
+        }
 
     def execute(self, arguments: Dict[str, Any]) -> ToolResult:
         command = arguments.get("command", "")
 
-        print(
-            "Shell workspace:",
-            self.workspace
-        )
-
         if not command:
             return ToolResult(self.name, False, error="command is empty")
-        if any(token in command.lower() for token in ("format c:", "rm -rf /", "del /s /q c:\\", "shutdown")):
+
+        if any(
+            token in command.lower()
+            for token in ("format c:", "rm -rf /", "del /s /q c:\\", "shutdown")
+        ):
             return ToolResult(self.name, False, error="blocked dangerous command")
+
         runtime_command = self._with_current_python(command)
         started = time.perf_counter()
+
         try:
-            p = subprocess.run(runtime_command, cwd=self.workspace, shell=True, capture_output=True, text=True, timeout=self.timeout_seconds)
-            output = (p.stdout + ("\n" + p.stderr if p.stderr else ""))[: self.max_output]
-            return ToolResult(self.name, p.returncode == 0, output=output, exit_code=p.returncode, duration_seconds=round(time.perf_counter() - started, 3))
+            completed = subprocess.run(
+                runtime_command,
+                cwd=self.workspace,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+            )
+            output = (
+                completed.stdout
+                + ("\n" + completed.stderr if completed.stderr else "")
+            )[: self.max_output]
+
+            return ToolResult(
+                self.name,
+                completed.returncode == 0,
+                output=output,
+                exit_code=completed.returncode,
+                duration_seconds=round(time.perf_counter() - started, 3),
+            )
+
         except subprocess.TimeoutExpired as exc:
-            return ToolResult(self.name, False, error=f"timeout after {self.timeout_seconds}s", output=str(exc), duration_seconds=round(time.perf_counter() - started, 3))
+            return ToolResult(
+                self.name,
+                False,
+                error=f"timeout after {self.timeout_seconds}s",
+                output=str(exc),
+                duration_seconds=round(time.perf_counter() - started, 3),
+            )
 
     @staticmethod
     def _with_current_python(command: str) -> str:
         stripped = command.strip()
         lowered = stripped.lower()
+
         for prefix in ("python ", "python3 ", "py "):
             if lowered.startswith(prefix):
                 return f'"{sys.executable}" {stripped[len(prefix):]}'
+
         return command
