@@ -102,6 +102,8 @@ def _rewrite_add_implementation(source: str, operator: ast.operator) -> str:
 
 
 class SoftwareAgent(Agent):
+    """Domain agent that owns its own tools and returns AgentResult directly."""
+
     def __init__(self, role: str, tools, state: SoftwareRunState):
         self.role = role
         self.tools = tools
