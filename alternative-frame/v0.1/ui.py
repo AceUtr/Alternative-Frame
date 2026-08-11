@@ -7,10 +7,9 @@ import os
 import queue
 import threading
 import tkinter as tk
-from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
-from typing import Any, Dict
+from typing import Dict
 
 from core.agents import AgentRegistry, DeterministicAgent
 from core.acceptance import AcceptanceEvaluator
@@ -40,7 +39,6 @@ from core.orchestrator import Orchestrator, RunReport
 from core.planning import PlanningPipeline
 from core.preflight import HarnessPreflightChecker
 from core.tools import ExperimentRunner, FileEditor, GitClient, ShellRunner, TestRunner, ToolRegistry
-from domains.software_demo import SoftwareDomainAdapter
 from run_api_demo import ROLE_PROMPTS
 
 
@@ -61,11 +59,7 @@ COLORS = {
 
 PROJECT_DIR = Path(__file__).resolve().parent
 TOOL_TEST_WORKSPACE = PROJECT_DIR / "tool_test_workspace"
-SOFTWARE_DEMO_GOAL = "Repair the supplied buggy application and prove the exact test command passes"
-SOFTWARE_DEMO_DEFAULT_MODE = "软件 Demo · 两阶段"
-SOFTWARE_DEMO_RECOVERY_MODE = "软件 Demo · 局部恢复"
-SOFTWARE_DEMO_MODES = (SOFTWARE_DEMO_DEFAULT_MODE, SOFTWARE_DEMO_RECOVERY_MODE)
-DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务", *SOFTWARE_DEMO_MODES)
+DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务")
 DEVELOPER_EXECUTION_MODES = ("工具调用自检", "失败修复自检")
 
 
@@ -75,7 +69,6 @@ def long_horizon_runs_root() -> Path:
 
 def build_registry(client=None, workspace=None, on_tool_event=None, tool_test: bool = False) -> AgentRegistry:
     registry = AgentRegistry()
-    permissions: dict[str, list[Any]] = {}
     if client is not None:
         workspace = workspace or __import__("pathlib").Path.cwd()
         shell = ShellRunner(workspace)
@@ -181,14 +174,12 @@ def build_tool_test_plan(goal: str) -> Plan:
         goal=goal,
         subtasks=[
             SubTask(
-                "tool_call_self_test",
-                "developer",
-                goal,
-                [],
-                [],
-                ["files_created", "tests_pass"],
-                0,
-                {
+                id="tool_call_self_test",
+                role="developer",
+                description=goal,
+                acceptance=["files_created", "tests_pass"],
+                max_retries=0,
+                metadata={
                     "expected_outputs": ["hello.py", "test_hello.py"],
                     "checks": [
                         {"id": "files_created", "check_type": "file_exists"},
@@ -225,14 +216,6 @@ def build_recovery_plan(pipeline: PlanningPipeline, state, evaluation) -> Plan:
     )
     for task in plan.subtasks:
         task.description += recovery_note
-    return plan
-
-
-def apply_software_fault_scenario(plan: Plan, scenario: str) -> Plan:
-    if scenario == "local-recovery":
-        for task in plan.subtasks:
-            if task.id == "run_targeted_tests":
-                task.metadata["fault_scenario"] = "local-recovery"
     return plan
 
 
@@ -578,7 +561,7 @@ class FreshUI(tk.Tk):
             textvariable=self.execution_mode,
             state="readonly",
             values=DEFAULT_EXECUTION_MODES,
-            width=20,
+            width=16,
         )
         self.execution_mode_box.pack(side=tk.LEFT)
         self.execution_mode_box.bind("<<ComboboxSelected>>", self._on_execution_mode_changed)
@@ -608,12 +591,6 @@ class FreshUI(tk.Tk):
 
     def _on_execution_mode_changed(self, _event=None):
         mode = self.execution_mode.get()
-        if mode in SOFTWARE_DEMO_MODES:
-            self.goal.delete("1.0", tk.END)
-            self.goal.insert("1.0", SOFTWARE_DEMO_GOAL)
-            self.mode.set("本地 Stub")
-            self.temperature.set("0.1")
-            return
         if mode not in ("工具调用自检", "失败修复自检"):
             return
         prompt_name = "REPAIR_PROMPT.txt" if mode == "失败修复自检" else "TEST_PROMPT.txt"
@@ -934,116 +911,9 @@ class FreshUI(tk.Tk):
             daemon=True,
         ).start()
 
-    def _run_software_demo_worker(self, execution_mode):
-        adapter = SoftwareDomainAdapter()
-        workspace = PROJECT_DIR / "examples" / "software_task"
-        adapter.reset_workspace(workspace)
-        tools, agents = adapter.configure(workspace=workspace)
-        contract = adapter.build_contract(SOFTWARE_DEMO_GOAL)
-        fault_scenario = (
-            "local-recovery"
-            if execution_mode == SOFTWARE_DEMO_RECOVERY_MODE
-            else "none"
-        )
-        initial_plan = (
-            apply_software_fault_scenario(adapter.build_plan(SOFTWARE_DEMO_GOAL), fault_scenario)
-            if fault_scenario == "local-recovery"
-            else adapter.build_initial_plan(SOFTWARE_DEMO_GOAL)
-        )
-
-        self.events.put((
-            "fixture_ready",
-            f"软件 Demo 工作区已重置：{workspace}；故障场景={fault_scenario}",
-        ))
-        self.events.put(("contract_plan", initial_plan))
-        preflight_report = HarnessPreflightChecker().check(
-            domains=DomainRegistry([adapter]),
-            domain=adapter.name,
-            plan=initial_plan,
-            agents=agents,
-            tools=tools,
-            workspace=workspace,
-            contract=contract,
-        )
-        self.events.put(("preflight_report", preflight_report))
-        preflight_report.require_ready()
-        self.events.put((
-            "contract_confirmed",
-            {
-                "criterion_count": len(contract.criteria),
-                "required_count": sum(item.required for item in contract.criteria),
-            },
-        ))
-
-        def on_task_event(event, task, result=None):
-            self.events.put((
-                "task_event",
-                (event, task.id, result, task.metadata.get("runtime_attempt")),
-            ))
-
-        def on_long_event(event, payload):
-            self.events.put(("long_horizon_event", (event, payload)))
-
-        def on_global_evaluator_event(event, payload):
-            self.events.put(("global_evaluator_event", (event, payload)))
-
-        orchestrator = Orchestrator(
-            agents,
-            max_workers=4,
-            on_event=on_task_event,
-            acceptance=AcceptanceEvaluator(workspace),
-            tools=tools,
-        )
-        evaluator = DeterministicGlobalEvaluator(
-            contract=contract,
-            workspace=workspace,
-            on_event=on_global_evaluator_event,
-        )
-        store = LongHorizonStore(long_horizon_runs_root())
-
-        def initial_planner(_state):
-            if fault_scenario == "local-recovery":
-                return apply_software_fault_scenario(
-                    adapter.build_plan(SOFTWARE_DEMO_GOAL),
-                    fault_scenario,
-                )
-            return adapter.build_initial_plan(SOFTWARE_DEMO_GOAL)
-
-        def replanner(_state, evaluation):
-            return adapter.build_recovery_plan(
-                SOFTWARE_DEMO_GOAL,
-                evaluation.missing_criteria,
-            )
-
-        controller = LongHorizonController(
-            orchestrator=orchestrator,
-            initial_planner=initial_planner,
-            store=store,
-            evaluator=evaluator,
-            replanner=replanner,
-            max_phases=2,
-            max_total_tasks=16,
-            on_event=on_long_event,
-            acceptance_contract=contract.to_dict(),
-            local_recovery=(
-                LocalDAGRecoveryController(orchestrator, max_cycles=1)
-                if fault_scenario == "local-recovery"
-                else None
-            ),
-        )
-        self.active_controller = controller
-        self.events.put(("controller_ready", None))
-        run_id = f"software-demo-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        report = controller.run(SOFTWARE_DEMO_GOAL, run_id=run_id)
-        self.events.put(("long_horizon_report", (report, store.state_path(report.state.run_id))))
-
     def _run_worker(self, goal, config, execution_mode, resume_run_id=None):
         try:
-            if execution_mode in SOFTWARE_DEMO_MODES:
-                self._run_software_demo_worker(execution_mode)
-                return
             pipeline = PlanningPipeline()
-            plan: Plan = pipeline.build(goal)
             tool_test = execution_mode in DEVELOPER_EXECUTION_MODES
             repair_test = execution_mode == "失败修复自检"
             if tool_test:

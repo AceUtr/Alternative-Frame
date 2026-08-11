@@ -1,26 +1,14 @@
 # Software Requirement
 
-
 ## Goal
 
-实现一个简单数学计算模块。
-
+Repair the supplied Python calculator module.
 
 ## Requirement
 
-提供函数：
-
-add(a,b)
-
-
-返回：
-
-a+b
-
+The `add(a, b)` function must return the arithmetic sum of its two inputs.
 
 ## Acceptance Criteria
 
-1. add(1,2)==3
-
-2. pytest测试全部通过
-
+1. `python -m pytest test_app.py -q -p no:cacheprovider` exits with code 0.
+2. The repaired source and current-run evidence are generated.

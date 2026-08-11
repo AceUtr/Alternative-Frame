@@ -76,17 +76,24 @@ def test_file_editor_rejects_workspace_escape(tmp_path):
 
 def test_software_plan_repairs_bug_and_generates_current_evidence(tmp_path):
     _adapter, workspace, tools, agents, plan, _contract = configure_software(tmp_path)
+    for task in plan.subtasks:
+        if task.id == "implement_fix":
+            task.metadata["fault_scenario"] = "retry-once"
     events = []
     report = Orchestrator(
         agents,
         acceptance=AcceptanceEvaluator(workspace),
-        tools=tools,
         on_event=lambda event, task, result=None: events.append((event, task.id, result)),
     ).run(plan)
 
     assert report.status == "success"
     assert report.results["implement_fix"].attempts == 2
     assert any(event == "task_retry_scheduled" and task_id == "implement_fix" for event, task_id, _ in events)
+    assert any(
+        record["tool"] == "retry_feedback"
+        and isinstance(record["arguments"], dict)
+        for record in report.results["implement_fix"].tool_records
+    )
     assert "return a + b" in (workspace / "app.py").read_text(encoding="utf-8")
     assert (workspace / "artifacts" / "software_report.md").is_file()
     assert (workspace / "artifacts" / "test_log.txt").is_file()
@@ -101,7 +108,6 @@ def test_local_recovery_scenario_freezes_prior_nodes_and_recovers_impacted_subgr
     orchestrator = Orchestrator(
         agents,
         acceptance=AcceptanceEvaluator(workspace),
-        tools=tools,
     )
     outcome = LocalDAGRecoveryController(orchestrator, max_cycles=1).run(plan, task_budget=12)
 

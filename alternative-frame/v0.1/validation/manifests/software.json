@@ -2,6 +2,8 @@
   "id": "software",
   "required_files": [
     "domains/software_demo.py",
+    "domains/software_tools/__init__.py",
+    "domains/software_tools/shell_runner.py",
     "run_software_demo.py",
     "examples/software_task/README.md",
     "examples/software_task/app.py",
@@ -27,6 +29,7 @@
   "smoke_command": ["python", "run_software_demo.py"],
   "scan_paths": [
     "domains/software_demo.py",
+    "domains/software_tools",
     "run_software_demo.py",
     "examples/software_task",
     "prompts/software",

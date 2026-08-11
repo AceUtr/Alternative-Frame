@@ -119,7 +119,20 @@ class SoftwareAgent(Agent):
         if isinstance(feedback, dict):
             self.retry_feedback.append(feedback)
 
-        return software_handler(task, self.tools, self.state)
+        result = software_handler(task, self.tools, self.state)
+        if isinstance(feedback, dict):
+            result.evidence.append("structured_retry_feedback_received")
+            result.tool_records.append(
+                {
+                    "tool": "retry_feedback",
+                    "arguments": feedback,
+                    "success": True,
+                    "exit_code": 0,
+                    "output_summary": "Structured retry feedback was supplied to the domain agent.",
+                    "metadata": {"feedback": feedback},
+                }
+            )
+        return result
 
 
 def software_handler(task: SubTask, tools, state: SoftwareRunState) -> AgentResult:
