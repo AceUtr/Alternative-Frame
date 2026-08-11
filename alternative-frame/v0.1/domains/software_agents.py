@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import ast
 import difflib
+from dataclasses import dataclass
+from typing import Any, Mapping
 
-from core.agents import AgentRegistry, DeterministicAgent
-from core.models import AgentResult
+from core.agents import Agent, AgentRegistry
+from core.models import AgentResult, SubTask
 
 
 PYTEST_COMMAND = "python -m pytest test_app.py -q -p no:cacheprovider"
 
-BEFORE_CODE = ""
-AFTER_CODE = ""
-TEST_OUTPUT = ""
-TEST_EXIT_CODE = None
+
+@dataclass
+class SoftwareRunState:
+    before_code: str = ""
+    after_code: str = ""
+    test_output: str = ""
+    test_exit_code: int | None = None
 
 
 def _record(tool_result, arguments=None):
@@ -33,7 +39,10 @@ def _read_file(tools, path):
 
 
 def _write_file(tools, path, content):
-    result = tools.execute("file_editor", {"action": "write", "path": path, "content": content})
+    result = tools.execute(
+        "file_editor",
+        {"action": "write", "path": path, "content": content},
+    )
     return result, _record(result, {"action": "write", "path": path})
 
 
@@ -66,13 +75,52 @@ def _failed(task, summary, failures, artifacts=None, evidence=None, tool_records
     )
 
 
-def software_handler(task, context):
-    global BEFORE_CODE, AFTER_CODE, TEST_OUTPUT, TEST_EXIT_CODE
+def _rewrite_add_implementation(source: str, operator: ast.operator) -> str:
+    tree = ast.parse(source)
 
-    tools = context.get("tools")
-    if tools is None:
-        return _failed(task, "No tool registry was provided", ["missing tool registry"])
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or node.name != "add":
+            continue
 
+        argument_names = [argument.arg for argument in node.args.args]
+        if argument_names[:2] != ["a", "b"]:
+            continue
+
+        node.body = [
+            ast.Return(
+                value=ast.BinOp(
+                    left=ast.Name(id="a", ctx=ast.Load()),
+                    op=operator,
+                    right=ast.Name(id="b", ctx=ast.Load()),
+                )
+            )
+        ]
+        ast.fix_missing_locations(tree)
+        return ast.unparse(tree) + "\n"
+
+    raise ValueError("fixture does not define add(a, b)")
+
+
+class SoftwareAgent(Agent):
+    def __init__(self, role: str, tools, state: SoftwareRunState):
+        self.role = role
+        self.tools = tools
+        self.state = state
+        self.retry_feedback: list[dict[str, Any]] = []
+
+    def run(
+        self,
+        task: SubTask,
+        context: Mapping[str, AgentResult],
+    ) -> AgentResult:
+        feedback = task.metadata.get("retry_feedback")
+        if isinstance(feedback, dict):
+            self.retry_feedback.append(feedback)
+
+        return software_handler(task, self.tools, self.state)
+
+
+def software_handler(task: SubTask, tools, state: SoftwareRunState) -> AgentResult:
     if task.role == "analyst":
         requirements, read_req = _read_file(tools, "requirements.md")
         code, read_code = _read_file(tools, "app.py")
@@ -86,9 +134,19 @@ def software_handler(task, context):
             f"{code.strip()}\n"
             "```\n"
         )
-        write, write_record = _write_file(tools, "artifacts/requirement_analysis.md", analysis)
+        write, write_record = _write_file(
+            tools,
+            "artifacts/requirement_analysis.md",
+            analysis,
+        )
         if not write.success:
-            return _failed(task, "Failed to write requirement analysis", [write.error], tool_records=[read_req, read_code, write_record])
+            return _failed(
+                task,
+                "Failed to write requirement analysis",
+                [write.error],
+                tool_records=[read_req, read_code, write_record],
+            )
+
         return _success(
             task,
             "Requirement analysis generated",
@@ -104,9 +162,19 @@ def software_handler(task, context):
             "- `test_app.py` contains executable regression tests.\n"
             "- `artifacts/` stores current-run analysis, diff, test log, and report evidence.\n"
         )
-        write, write_record = _write_file(tools, "artifacts/architecture_design.md", architecture)
+        write, write_record = _write_file(
+            tools,
+            "artifacts/architecture_design.md",
+            architecture,
+        )
         if not write.success:
-            return _failed(task, "Failed to write architecture design", [write.error], tool_records=[write_record])
+            return _failed(
+                task,
+                "Failed to write architecture design",
+                [write.error],
+                tool_records=[write_record],
+            )
+
         return _success(
             task,
             "Architecture design generated",
@@ -129,27 +197,43 @@ def software_handler(task, context):
             )
 
         test_result, test_record = _run_tests(tools)
-        TEST_OUTPUT = test_result.output or test_result.error
-        TEST_EXIT_CODE = test_result.exit_code
+        state.test_output = test_result.output or test_result.error or ""
+        state.test_exit_code = test_result.exit_code
 
         if task.id == "diagnose_failure":
             diagnosis = (
                 "# Diagnosis\n\n"
                 f"- Command: `{PYTEST_COMMAND}`\n"
-                f"- Exit code: {TEST_EXIT_CODE}\n"
+                f"- Exit code: {state.test_exit_code}\n"
                 "- Result: failing baseline captured before repair.\n"
             )
-            write, write_record = _write_file(tools, "artifacts/diagnosis.md", diagnosis)
-            status_note = "failing baseline captured" if TEST_EXIT_CODE != 0 else "baseline already passed"
+            write, write_record = _write_file(
+                tools,
+                "artifacts/diagnosis.md",
+                diagnosis,
+            )
+            if not write.success:
+                return _failed(
+                    task,
+                    "Failed to write diagnosis",
+                    [write.error],
+                    tool_records=[test_record, write_record],
+                )
+
+            status_note = (
+                "failing baseline captured"
+                if state.test_exit_code != 0
+                else "baseline already passed"
+            )
             return _success(
                 task,
                 status_note,
-                artifacts=write.metadata.get("artifacts", []) if write.success else [],
+                artifacts=write.metadata.get("artifacts", []),
                 evidence=["baseline_test_executed"],
                 tool_records=[test_record, write_record],
             )
 
-        if test_result.success and TEST_EXIT_CODE == 0:
+        if test_result.success and state.test_exit_code == 0:
             test_record["metadata"] = {
                 **test_record.get("metadata", {}),
                 "artifacts": ["test_app.py"],
@@ -161,52 +245,62 @@ def software_handler(task, context):
                 evidence=["pytest_pass"],
                 tool_records=[test_record],
             )
+
         return _failed(
             task,
             "Regression tests failed",
-            [TEST_OUTPUT],
+            [state.test_output],
             evidence=["pytest_failed"],
             tool_records=[test_record],
         )
 
     if task.role == "developer":
         code, read_record = _read_file(tools, "app.py")
-        BEFORE_CODE = BEFORE_CODE or code
-        attempt = int(task.metadata.get("runtime_attempt", 1))
+        state.before_code = state.before_code or code
 
-        if attempt == 1:
-            repaired = code.replace("return b - a", "return a * b").replace("return a-b", "return a * b")
+        attempt = int(task.metadata.get("runtime_attempt", 1))
+        fault_scenario = task.metadata.get("fault_scenario", "none")
+
+        if fault_scenario == "retry-once" and attempt == 1:
+            repaired = _rewrite_add_implementation(code, ast.Mult())
         else:
-            repaired = (
-                code.replace("return b - a", "return a + b")
-                .replace("return a-b", "return a + b")
-                .replace("return a * b", "return a + b")
-                .replace("return a*b", "return a + b")
-            )
+            repaired = _rewrite_add_implementation(code, ast.Add())
 
         write, write_record = _write_file(tools, "app.py", repaired)
-        AFTER_CODE = repaired
+        state.after_code = repaired
+
         if not write.success:
-            return _failed(task, "Failed to write repaired source", [write.error], tool_records=[read_record, write_record])
+            return _failed(
+                task,
+                "Failed to write repaired source",
+                [write.error],
+                tool_records=[read_record, write_record],
+            )
 
         test_result, test_record = _run_tests(tools)
-        TEST_OUTPUT = test_result.output or test_result.error
-        TEST_EXIT_CODE = test_result.exit_code
+        state.test_output = test_result.output or test_result.error or ""
+        state.test_exit_code = test_result.exit_code
+
         records = [read_record, write_record, test_record]
         artifacts = write.metadata.get("artifacts", [])
 
-        if test_result.success and TEST_EXIT_CODE == 0:
+        if test_result.success and state.test_exit_code == 0:
+            evidence = ["source_updated", "pytest_pass"]
+            if task.metadata.get("retry_feedback"):
+                evidence.append("retry_feedback_received")
+
             return _success(
                 task,
                 "Source code modified and exact tests passed",
                 artifacts=artifacts,
-                evidence=["source_updated", "pytest_pass"],
+                evidence=evidence,
                 tool_records=records,
             )
+
         return _failed(
             task,
             "Source code modified but exact tests failed",
-            [TEST_OUTPUT],
+            [state.test_output],
             artifacts=artifacts,
             evidence=["source_updated", "pytest_failed"],
             tool_records=records,
@@ -215,44 +309,69 @@ def software_handler(task, context):
     if task.role == "reviewer":
         code, read_record = _read_file(tools, "app.py")
         if "return a + b" in code:
-            review = "Code review verified the repaired implementation uses `return a + b`."
-            return _success(task, review, evidence=["review_complete"], tool_records=[read_record])
-        return _failed(task, "Code review found the repair incomplete", ["expected `return a + b`"], tool_records=[read_record])
+            return _success(
+                task,
+                "Code review verified the repaired implementation uses `return a + b`.",
+                evidence=["review_complete"],
+                tool_records=[read_record],
+            )
+
+        return _failed(
+            task,
+            "Code review found the repair incomplete",
+            ["expected `return a + b`"],
+            tool_records=[read_record],
+        )
 
     if task.role == "reporter":
         current_code, read_record = _read_file(tools, "app.py")
-        if not AFTER_CODE:
-            AFTER_CODE = current_code
-        before = BEFORE_CODE or ""
+        if not state.after_code:
+            state.after_code = current_code
+
         diff = "\n".join(
             difflib.unified_diff(
-                before.splitlines(),
+                (state.before_code or "").splitlines(),
                 current_code.splitlines(),
                 fromfile="before/app.py",
                 tofile="after/app.py",
                 lineterm="",
             )
         )
-        status = "PASS" if TEST_EXIT_CODE == 0 else "FAILED"
+
+        status = "PASS" if state.test_exit_code == 0 else "FAILED"
         report = (
             "# Software Engineering Agent Report\n\n"
             "## Execution Evidence\n\n"
             f"- Status: {status}\n"
-            f"- Modified file: `app.py`\n"
+            "- Modified file: `app.py`\n"
             f"- Test command: `{PYTEST_COMMAND}`\n"
-            f"- Test exit code: {TEST_EXIT_CODE}\n\n"
+            f"- Test exit code: {state.test_exit_code}\n\n"
             "## Diff\n\n"
             "```diff\n"
             f"{diff}\n"
             "```\n\n"
             "## Test Output\n\n"
             "```text\n"
-            f"{(TEST_OUTPUT or '').strip()}\n"
+            f"{state.test_output.strip()}\n"
             "```\n"
         )
-        report_write, report_record = _write_file(tools, "artifacts/software_report.md", report)
-        diff_write, diff_record = _write_file(tools, "artifacts/code_diff.patch", diff)
-        log_write, log_record = _write_file(tools, "artifacts/test_log.txt", TEST_OUTPUT or "")
+
+        report_write, report_record = _write_file(
+            tools,
+            "artifacts/software_report.md",
+            report,
+        )
+        diff_write, diff_record = _write_file(
+            tools,
+            "artifacts/code_diff.patch",
+            diff,
+        )
+        log_write, log_record = _write_file(
+            tools,
+            "artifacts/test_log.txt",
+            state.test_output,
+        )
+
         records = [read_record, report_record, diff_record, log_record]
         failures = [
             item.error
@@ -260,7 +379,13 @@ def software_handler(task, context):
             if not item.success
         ]
         if failures:
-            return _failed(task, "Failed to write software report artifacts", failures, tool_records=records)
+            return _failed(
+                task,
+                "Failed to write software report artifacts",
+                failures,
+                tool_records=records,
+            )
+
         return _success(
             task,
             "Software report generated from current-run test evidence",
@@ -273,12 +398,18 @@ def software_handler(task, context):
             tool_records=records,
         )
 
-    return _failed(task, f"Unsupported software role: {task.role}", [f"unknown role {task.role}"])
+    return _failed(
+        task,
+        f"Unsupported software role: {task.role}",
+        [f"unknown role {task.role}"],
+    )
 
 
-def build_software_agents():
+def build_software_agents(tools):
     registry = AgentRegistry()
-    for role in ("analyst", "architect", "developer", "tester", "reviewer", "reporter"):
-        registry.register(DeterministicAgent(role=role, handler=software_handler))
-    return registry
+    state = SoftwareRunState()
 
+    for role in ("analyst", "architect", "developer", "tester", "reviewer", "reporter"):
+        registry.register(SoftwareAgent(role, tools, state))
+
+    return registry
