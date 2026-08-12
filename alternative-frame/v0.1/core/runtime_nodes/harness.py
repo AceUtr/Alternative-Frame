@@ -71,7 +71,7 @@ class NodeRoutedAgent(Agent):
             # Keep restore -> execute -> save atomic for parallel Orchestrator
             # tasks sharing the same mutable node-state sidecar.
             with self._node_state_lock:
-                available_nodes = self.node_state_store.restore(available_nodes)
+                available_nodes = self.node_state_store.prepare(available_nodes)
                 try:
                     runtime_result = execute_on_nodes()
                 finally:

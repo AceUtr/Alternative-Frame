@@ -110,9 +110,23 @@ runs/edge_cloud_long_horizon/<run_id>/
 python run_edge_cloud_replan_demo.py
 ```
 
-该演示证明：第一阶段完成后由 Replan 生成第二阶段任务，第二阶段 cloud 故障回退 edge；随后在阶段边界暂停。恢复时使用一组全新的节点对象，通过 `node_state.json` 恢复动态节点健康状态，第三阶段 Replan 任务因此直接路由到 edge。
+该演示现在由正式 `AcceptanceContract` 驱动。第一阶段只完成敏感数据 device 预处理，全局评估明确输出剩余 `missing_criteria`；`contract_replan` 只根据这些缺口生成后续路由任务，不读取阶段编号。只有以下 required 条款全部具有当前 run 证据时才会完成：
 
-`NodeStateStore` 只持久化 `node_id`、`node_type`、`online`、`network_available`，不修改冻结的 `LongHorizonState` 数据模型。
+- `device_sensitive_preprocess`
+- `high_compute_artifact`
+- `cloud_edge_fallback_evidence`
+- `post_resume_task_completed`
+- `final_report_exists`
+
+第二阶段完成 cloud 故障与 edge 回退后在阶段边界暂停。恢复时使用一组全新的节点对象，并通过 current probe 获取实时状态。历史 `node_state.json` 只用于审计和差异比较，不再覆盖当前探测。
+
+`NodeStateStore` sidecar 保存 `node_id`、`node_type`、`online`、`network_available` 和 `probe_status`，不修改冻结的 `LongHorizonState` 数据模型。恢复探测会产生：
+
+- `node_state_snapshot_saved`
+- `node_state_reprobed`
+- `node_state_changed`（仅状态确实变化时）
+
+探测失败或没有有效探测时状态为 `unknown`，节点不会被当作在线候选。恢复时 cloud 重新上线可再次选 cloud；恢复时 cloud 离线则选择 edge。
 
 ## 动态故障语义
 

@@ -36,6 +36,7 @@ class ExecutionNode:
     online: bool = True
     network_available: bool = True
     execution_failure_mode: str | None = None
+    probe_status: str = "current"
 
     def __post_init__(self) -> None:
         self.node_id = str(self.node_id).strip()
@@ -51,6 +52,8 @@ class ExecutionNode:
             raise ValueError("estimated_cost cannot be negative")
         if self.execution_failure_mode not in {None, "offline", "network", "timeout"}:
             raise ValueError(f"unsupported execution_failure_mode: {self.execution_failure_mode}")
+        if self.probe_status not in {"current", "success", "failed", "unknown"}:
+            raise ValueError(f"unsupported probe_status: {self.probe_status}")
 
     def execute(self, action: Callable[[], Any]) -> Any:
         """Execute a local action while preserving a remote-compatible seam."""
@@ -77,6 +80,7 @@ class DeviceNode(ExecutionNode):
         online: bool = True,
         network_available: bool = True,
         execution_failure_mode: str | None = None,
+        probe_status: str = "current",
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -87,6 +91,7 @@ class DeviceNode(ExecutionNode):
             online=online,
             network_available=network_available,
             execution_failure_mode=execution_failure_mode,
+            probe_status=probe_status,
         )
 
 
@@ -100,6 +105,7 @@ class EdgeNode(ExecutionNode):
         online: bool = True,
         network_available: bool = True,
         execution_failure_mode: str | None = None,
+        probe_status: str = "current",
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -110,6 +116,7 @@ class EdgeNode(ExecutionNode):
             online=online,
             network_available=network_available,
             execution_failure_mode=execution_failure_mode,
+            probe_status=probe_status,
         )
 
 
@@ -123,6 +130,7 @@ class CloudNode(ExecutionNode):
         online: bool = True,
         network_available: bool = True,
         execution_failure_mode: str | None = None,
+        probe_status: str = "current",
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -133,6 +141,7 @@ class CloudNode(ExecutionNode):
             online=online,
             network_available=network_available,
             execution_failure_mode=execution_failure_mode,
+            probe_status=probe_status,
         )
 
 
@@ -147,6 +156,7 @@ __all__ = [
     "NodeExecutionTimeout",
     "NodeNetworkError",
     "NodeRoutedAgent",
+    "NodeProbeResult",
     "NodeStateStore",
     "NodeUnavailableError",
     "RuntimeExecutionResult",
@@ -163,7 +173,7 @@ __all__ = [
 # ExecutionNode for placement decisions.
 from .executor import RuntimeExecutionResult, RuntimeExecutor
 from .harness import LongHorizonEventSink, NodeRoutedAgent
-from .state_store import NODE_STATE_SCHEMA_VERSION, NodeStateStore
+from .state_store import NODE_STATE_SCHEMA_VERSION, NodeProbeResult, NodeStateStore
 from .telemetry import (
     RUNTIME_EVENT_NAMES,
     RUNTIME_TELEMETRY_SCHEMA_VERSION,

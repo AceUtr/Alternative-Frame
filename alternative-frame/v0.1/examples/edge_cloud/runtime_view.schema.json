@@ -20,7 +20,7 @@
           "capabilities": {"type": "array", "items": {"type": "string"}},
           "estimated_latency_ms": {"type": "number"},
           "estimated_cost": {"type": "number"},
-          "health": {"enum": ["healthy", "offline", "network_unavailable"]}
+          "health": {"enum": ["healthy", "offline", "network_unavailable", "unknown"]}
         }
       }
     },

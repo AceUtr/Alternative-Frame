@@ -20,7 +20,15 @@ class NodeView:
 
     @classmethod
     def from_node(cls, node: ExecutionNode) -> "NodeView":
-        health = "offline" if not node.online else "network_unavailable" if not node.network_available else "healthy"
+        health = (
+            "unknown"
+            if node.probe_status in {"failed", "unknown"}
+            else "offline"
+            if not node.online
+            else "network_unavailable"
+            if not node.network_available
+            else "healthy"
+        )
         return cls(
             node_id=node.node_id,
             node_type=node.node_type,

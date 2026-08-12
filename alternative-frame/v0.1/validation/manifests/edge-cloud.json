@@ -25,7 +25,7 @@
     "core.routing"
   ],
   "required_symbols": {
-    "core.runtime_nodes": ["ExecutionNode", "DeviceNode", "EdgeNode", "CloudNode", "RuntimeExecutor", "NodeRoutedAgent", "NodeStateStore", "LongHorizonEventSink", "build_runtime_view", "aggregate_runtime_metrics"],
+    "core.runtime_nodes": ["ExecutionNode", "DeviceNode", "EdgeNode", "CloudNode", "RuntimeExecutor", "NodeRoutedAgent", "NodeStateStore", "NodeProbeResult", "LongHorizonEventSink", "build_runtime_view", "aggregate_runtime_metrics"],
     "core.routing": ["TaskRequirements", "PlacementDecision", "NodeRouter"]
   },
   "test_commands": [
