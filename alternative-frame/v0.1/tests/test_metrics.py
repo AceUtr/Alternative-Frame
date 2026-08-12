@@ -156,3 +156,40 @@ def test_legacy_jsonl_is_readable(tmp_path: Path):
     assert len(rows) == 1
     assert rows[0].schema_version == "0.1"
     assert rows[0].metadata["legacy_token_zero_may_mean_unknown"] is True
+
+
+def test_tool_call_is_recorded_even_without_token_usage():
+    report = SimpleNamespace(
+        status="success", rounds=1, local_recovery_cycles=0,
+        results={"t1": AgentResult("t1", "success", tool_records=[{"tool": "shell", "success": True}])},
+    )
+    metrics = metrics_from_report(report, "software", "real", "model-x", 0.0, "run-tools")
+    assert metrics.tool_calls == 1
+    assert len(metrics.calls) == 1
+    assert metrics.calls[0].total_tokens is None
+
+
+def test_plan_metadata_drives_node_distribution():
+    from core.models import Plan, SubTask
+    plan = Plan("node-test", [SubTask("t1", "developer", "x", metadata={"node": "edge"})])
+    report = SimpleNamespace(
+        status="success", rounds=1, local_recovery_cycles=0,
+        results={"t1": AgentResult("t1", "success")},
+    )
+    metrics = metrics_from_report(report, "software", "stub", "deterministic", 0.0, "run-node", plan=plan)
+    assert metrics.edge_task_count == 1
+    assert metrics.unknown_node_task_count == 0
+
+
+def test_explicit_pricing_calculates_cost_and_missing_pricing_is_unknown():
+    report = SimpleNamespace(
+        status="success", rounds=1, local_recovery_cycles=0,
+        results={"t1": AgentResult(
+            "t1", "success", evidence=["api_response_received"],
+            tool_records=[{"tool": "model", "success": True, "usage": {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}}],
+        )},
+    )
+    priced = metrics_from_report(report, "research", "real", "model-x", 0.0, "priced", pricing={"input_per_million": 2, "output_per_million": 4})
+    unknown = metrics_from_report(report, "research", "real", "model-x", 0.0, "unknown")
+    assert priced.estimated_cost == 0.004
+    assert unknown.estimated_cost is None
