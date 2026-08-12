@@ -1,4 +1,6 @@
 import subprocess
+import importlib.util
+import py_compile
 
 from core.acceptance import AcceptanceEvaluator
 from core.domains import DomainRegistry
@@ -97,6 +99,28 @@ def test_software_plan_repairs_bug_and_generates_current_evidence(tmp_path):
     assert "return a + b" in (workspace / "app.py").read_text(encoding="utf-8")
     assert (workspace / "artifacts" / "software_report.md").is_file()
     assert (workspace / "artifacts" / "test_log.txt").is_file()
+
+
+def test_retry_once_clears_equal_length_stale_bytecode(tmp_path):
+    _adapter, workspace, _tools, agents, plan, _contract = configure_software(tmp_path)
+    stale_source = "def add(a, b):\n    return a * b\n"
+    (workspace / "app.py").write_text(stale_source, encoding="utf-8")
+    py_compile.compile(
+        str(workspace / "app.py"),
+        cfile=importlib.util.cache_from_source(str(workspace / "app.py")),
+    )
+    for task in plan.subtasks:
+        if task.id == "implement_fix":
+            task.metadata["fault_scenario"] = "retry-once"
+
+    report = Orchestrator(
+        agents,
+        acceptance=AcceptanceEvaluator(workspace),
+    ).run(plan)
+
+    assert report.status == "success"
+    assert report.results["implement_fix"].attempts == 2
+    assert "return a + b" in (workspace / "app.py").read_text(encoding="utf-8")
 
 
 def test_local_recovery_scenario_freezes_prior_nodes_and_recovers_impacted_subgraph(tmp_path):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
+import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -42,6 +43,8 @@ class SoftwareShellRunner(Tool):
 
         runtime_command = self._with_current_python(command)
         started = time.perf_counter()
+        env = dict(os.environ)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         try:
             completed = subprocess.run(
                 runtime_command,
@@ -50,6 +53,7 @@ class SoftwareShellRunner(Tool):
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_seconds,
+                env=env,
             )
         except subprocess.TimeoutExpired as exc:
             return ToolResult(

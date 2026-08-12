@@ -139,7 +139,7 @@ class SoftwareDomainAdapter(DomainAdapter):
             max_retries=2,
             metadata={
                 "workspace": WORKSPACE,
-                "required_tools": ["file_editor", "test_runner"],
+                "required_tools": ["file_editor", "shell_runner", "test_runner"],
                 "expected_outputs": ["app.py"],
                 "contract_criteria": ["source_updated", "pytest_pass"],
                 "checks": [
