@@ -46,20 +46,6 @@ def _write_file(tools, path, content):
     return result, _record(result, {"action": "write", "path": path})
 
 
-def _clear_python_cache(tools):
-    result = tools.execute(
-        "shell_runner",
-        {
-            "command": (
-                "python -c \"import pathlib, shutil; "
-                "[shutil.rmtree(p, ignore_errors=True) for p in pathlib.Path('.').rglob('__pycache__')]; "
-                "[p.unlink(missing_ok=True) for p in pathlib.Path('.').rglob('*.pyc')]\""
-            )
-        },
-    )
-    return result, _record(result, {"command": "clear_python_cache"})
-
-
 def _run_tests(tools):
     arguments = {"command": PYTEST_COMMAND}
     result = tools.execute("test_runner", arguments)
@@ -133,20 +119,7 @@ class SoftwareAgent(Agent):
         if isinstance(feedback, dict):
             self.retry_feedback.append(feedback)
 
-        result = software_handler(task, self.tools, self.state)
-        if isinstance(feedback, dict):
-            result.evidence.append("structured_retry_feedback_received")
-            result.tool_records.append(
-                {
-                    "tool": "retry_feedback",
-                    "arguments": feedback,
-                    "success": True,
-                    "exit_code": 0,
-                    "output_summary": "Structured retry feedback was supplied to the domain agent.",
-                    "metadata": {"feedback": feedback},
-                }
-            )
-        return result
+        return software_handler(task, self.tools, self.state)
 
 
 def software_handler(task: SubTask, tools, state: SoftwareRunState) -> AgentResult:
@@ -306,22 +279,11 @@ def software_handler(task: SubTask, tools, state: SoftwareRunState) -> AgentResu
                 tool_records=[read_record, write_record],
             )
 
-        cache_clear, cache_record = _clear_python_cache(tools)
-        if not cache_clear.success:
-            return _failed(
-                task,
-                "Failed to clear Python bytecode cache after source rewrite",
-                [cache_clear.error or cache_clear.output],
-                artifacts=write.metadata.get("artifacts", []),
-                evidence=["source_updated", "pycache_clear_failed"],
-                tool_records=[read_record, write_record, cache_record],
-            )
-
         test_result, test_record = _run_tests(tools)
         state.test_output = test_result.output or test_result.error or ""
         state.test_exit_code = test_result.exit_code
 
-        records = [read_record, write_record, cache_record, test_record]
+        records = [read_record, write_record, test_record]
         artifacts = write.metadata.get("artifacts", [])
 
         if test_result.success and state.test_exit_code == 0:
