@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime_view.schema.json",
+  "title": "Edge-cloud runtime view",
+  "type": "object",
+  "required": ["schema_version", "nodes", "route_events", "metrics"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "run_id": {"type": "string"},
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node_id", "node_type", "online", "network_available", "capabilities", "estimated_latency_ms", "estimated_cost", "health"],
+        "properties": {
+          "node_id": {"type": "string"},
+          "node_type": {"enum": ["device", "edge", "cloud"]},
+          "online": {"type": "boolean"},
+          "network_available": {"type": "boolean"},
+          "capabilities": {"type": "array", "items": {"type": "string"}},
+          "estimated_latency_ms": {"type": "number"},
+          "estimated_cost": {"type": "number"},
+          "health": {"enum": ["healthy", "offline", "network_unavailable"]}
+        }
+      }
+    },
+    "route_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["event", "task_id", "node_id", "node_type", "placement_reason", "duration", "fallback_count", "success", "failure_kind", "error", "time"]
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": ["schema_version", "node_distribution", "node_duration_seconds", "node_failure_count", "fallback_count", "execution_attempt_count", "no_eligible_node_count"]
+    }
+  }
+}

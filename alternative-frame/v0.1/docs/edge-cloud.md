@@ -40,7 +40,18 @@ runs/edge_cloud_long_horizon/<run_id>/
   workspace/artifacts/*.json
 ```
 
-`runtime_view.json` 是可直接 `json.load` 的 UI 输入；本阶段没有修改 `ui.py`。
+`runtime_view.json` 是可直接 `json.load` 的 UI 输入；本阶段没有修改 `ui.py`。稳定 schema 和固定样例位于：
+
+- `examples/edge_cloud/runtime_view.schema.json`
+- `examples/edge_cloud/runtime_view_normal.json`
+- `examples/edge_cloud/runtime_view_cloud_edge_fallback.json`
+- `examples/edge_cloud/samples/normal/`
+- `examples/edge_cloud/samples/cloud_edge_fallback/`
+
+后两个目录是交给 D 的固定演示输入，每个目录包含同一 `run_id` 对齐的 `state.json`、`events.jsonl` 和 `runtime_view.json`。
+
+三类文件必须使用同一个 `run_id` 对齐。UI 或 benchmark 只能读取 `state.json`、`events.jsonl`、`runtime_view.json`，不得回写原始文件。
+新生成的 v1.0 数据总是带 `run_id`；为兼容第二阶段已经生成的 v1.0 文件，读取端应允许该字段缺失，并将其标记为 `unknown` 或从对应 `state.json` 补齐。
 
 ## 运行事件与 evidence
 
@@ -82,11 +93,26 @@ runs/edge_cloud_long_horizon/<run_id>/
 ```json
 {
   "schema_version": "1.0",
+  "run_id": "one-run-id",
   "nodes": [],
   "route_events": [],
   "metrics": {}
 }
 ```
+
+缺失或未知的 `node_type` 必须累计到 `unknown`，不能默认为 `device` 或数值 `0`。聚合指标必须能够从 `state.json` 中原始 `runtime_executor` records 重新计算并与 `runtime_view.json.metrics` 一致。
+
+## 跨阶段 Replan 与恢复
+
+运行：
+
+```powershell
+python run_edge_cloud_replan_demo.py
+```
+
+该演示证明：第一阶段完成后由 Replan 生成第二阶段任务，第二阶段 cloud 故障回退 edge；随后在阶段边界暂停。恢复时使用一组全新的节点对象，通过 `node_state.json` 恢复动态节点健康状态，第三阶段 Replan 任务因此直接路由到 edge。
+
+`NodeStateStore` 只持久化 `node_id`、`node_type`、`online`、`network_available`，不修改冻结的 `LongHorizonState` 数据模型。
 
 ## 动态故障语义
 

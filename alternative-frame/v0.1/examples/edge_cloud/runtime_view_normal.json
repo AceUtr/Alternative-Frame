@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "run_id": "sample-normal-v1",
+  "nodes": [
+    {"node_id": "device-1", "node_type": "device", "online": true, "network_available": true, "capabilities": ["preprocess"], "estimated_latency_ms": 5, "estimated_cost": 0, "health": "healthy"},
+    {"node_id": "edge-1", "node_type": "edge", "online": true, "network_available": true, "capabilities": ["inference"], "estimated_latency_ms": 20, "estimated_cost": 0.2, "health": "healthy"},
+    {"node_id": "cloud-1", "node_type": "cloud", "online": true, "network_available": true, "capabilities": ["compute"], "estimated_latency_ms": 60, "estimated_cost": 1, "health": "healthy"}
+  ],
+  "route_events": [],
+  "metrics": {
+    "schema_version": "1.0",
+    "node_distribution": {"device": 1, "edge": 1, "cloud": 1, "unknown": 0},
+    "node_duration_seconds": {"device": 0.01, "edge": 0.02, "cloud": 0.03, "unknown": 0.0},
+    "node_failure_count": {"device": 0, "edge": 0, "cloud": 0, "unknown": 0},
+    "fallback_count": 0,
+    "execution_attempt_count": 3,
+    "no_eligible_node_count": 0
+  }
+}

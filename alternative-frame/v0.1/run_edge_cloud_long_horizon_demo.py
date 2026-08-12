@@ -268,7 +268,9 @@ def run_demo(root: Path, run_id: str) -> DemoRun:
     )
     report = controller.run(GOAL, run_id=run_id)
     events = _read_events(run_dir / "events.jsonl")
-    runtime_view = build_runtime_view(nodes, report.state.evidence_records, events).to_dict()
+    runtime_view = build_runtime_view(
+        nodes, report.state.evidence_records, events, run_id=run_id
+    ).to_dict()
     (run_dir / "runtime_view.json").write_text(
         json.dumps(runtime_view, ensure_ascii=False, indent=2),
         encoding="utf-8",

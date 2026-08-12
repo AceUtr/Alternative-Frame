@@ -9,6 +9,7 @@ from core.routing import TaskRequirements
 
 from . import ExecutionNode
 from .executor import RuntimeExecutor
+from .state_store import NodeStateStore
 
 
 NodeProvider = Iterable[ExecutionNode] | Callable[[SubTask], Iterable[ExecutionNode]]
@@ -40,6 +41,7 @@ class NodeRoutedAgent(Agent):
         delegate: Agent,
         nodes: NodeProvider,
         executor: RuntimeExecutor | None = None,
+        node_state_store: NodeStateStore | None = None,
     ) -> None:
         if not getattr(delegate, "role", None):
             raise ValueError("delegate Agent must define a role")
@@ -47,6 +49,8 @@ class NodeRoutedAgent(Agent):
         self.role = delegate.role
         self.nodes = nodes
         self.executor = executor or RuntimeExecutor()
+        self.node_state_store = node_state_store
+        self._node_state_lock = Lock()
 
     def run(self, task: SubTask, context: Mapping[str, AgentResult]) -> AgentResult:
         requirements = TaskRequirements.from_metadata(task.id, task.metadata)
@@ -60,11 +64,20 @@ class NodeRoutedAgent(Agent):
             task.metadata["node_id"] = node.node_id
             return self.delegate.run(task, context)
 
-        runtime_result = self.executor.execute(
-            requirements,
-            available_nodes,
-            run_delegate,
-        )
+        def execute_on_nodes():
+            return self.executor.execute(requirements, available_nodes, run_delegate)
+
+        if self.node_state_store:
+            # Keep restore -> execute -> save atomic for parallel Orchestrator
+            # tasks sharing the same mutable node-state sidecar.
+            with self._node_state_lock:
+                available_nodes = self.node_state_store.restore(available_nodes)
+                try:
+                    runtime_result = execute_on_nodes()
+                finally:
+                    self.node_state_store.save(available_nodes)
+        else:
+            runtime_result = execute_on_nodes()
         if not runtime_result.success or not isinstance(runtime_result.output, AgentResult):
             return AgentResult(
                 subtask_id=task.id,

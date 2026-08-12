@@ -68,6 +68,7 @@ class RouteEventView:
 @dataclass
 class RuntimeViewSnapshot:
     schema_version: str = "1.0"
+    run_id: str = ""
     nodes: List[NodeView] = field(default_factory=list)
     route_events: List[RouteEventView] = field(default_factory=list)
     metrics: Dict[str, Any] = field(default_factory=dict)
@@ -75,6 +76,7 @@ class RuntimeViewSnapshot:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "schema_version": self.schema_version,
+            "run_id": self.run_id,
             "nodes": [asdict(node) for node in self.nodes],
             "route_events": [asdict(event) for event in self.route_events],
             "metrics": dict(self.metrics),
@@ -85,6 +87,7 @@ def build_runtime_view(
     nodes: Iterable[ExecutionNode],
     evidence_records: Iterable[Mapping[str, Any]],
     events: Iterable[Mapping[str, Any]],
+    run_id: str = "",
 ) -> RuntimeViewSnapshot:
     records = [dict(record) for record in evidence_records]
     route_events = [
@@ -93,6 +96,7 @@ def build_runtime_view(
         if str(record.get("event") or "").startswith(("placement_", "node_"))
     ]
     return RuntimeViewSnapshot(
+        run_id=run_id,
         nodes=[NodeView.from_node(node) for node in sorted(nodes, key=lambda item: item.node_id)],
         route_events=route_events,
         metrics=aggregate_runtime_metrics(records),

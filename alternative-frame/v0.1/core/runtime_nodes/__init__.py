@@ -142,10 +142,12 @@ __all__ = [
     "EdgeNode",
     "ExecutionNode",
     "LongHorizonEventSink",
+    "NODE_STATE_SCHEMA_VERSION",
     "NodeExecutionError",
     "NodeExecutionTimeout",
     "NodeNetworkError",
     "NodeRoutedAgent",
+    "NodeStateStore",
     "NodeUnavailableError",
     "RuntimeExecutionResult",
     "RuntimeExecutor",
@@ -161,6 +163,7 @@ __all__ = [
 # ExecutionNode for placement decisions.
 from .executor import RuntimeExecutionResult, RuntimeExecutor
 from .harness import LongHorizonEventSink, NodeRoutedAgent
+from .state_store import NODE_STATE_SCHEMA_VERSION, NodeStateStore
 from .telemetry import (
     RUNTIME_EVENT_NAMES,
     RUNTIME_TELEMETRY_SCHEMA_VERSION,
