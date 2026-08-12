@@ -7,9 +7,9 @@ from core.domains import DomainAdapter
 from core.long_horizon.acceptance_contract import AcceptanceContract, GoalCriterion
 from core.models import Plan, SubTask
 from core.tools.file_editor import FileEditor
+from core.tools.shell_runner import ShellRunner
 from core.tools.test_runner import TestRunner
 from domains.software_agents import build_software_agents
-from domains.software_tools import SoftwareShellRunner
 
 
 WORKSPACE = "examples/software_task"
@@ -61,7 +61,7 @@ class SoftwareDomainAdapter(DomainAdapter):
     name = "software"
 
     def register_tools(self, registry, workspace):
-        shell_runner = SoftwareShellRunner(workspace)
+        shell_runner = ShellRunner(workspace)
         registry.register(FileEditor(workspace))
         registry.register(shell_runner)
         registry.register(TestRunner(shell_runner))
@@ -139,7 +139,7 @@ class SoftwareDomainAdapter(DomainAdapter):
             max_retries=2,
             metadata={
                 "workspace": WORKSPACE,
-                "required_tools": ["file_editor", "shell_runner", "test_runner"],
+                "required_tools": ["file_editor", "test_runner"],
                 "expected_outputs": ["app.py"],
                 "contract_criteria": ["source_updated", "pytest_pass"],
                 "checks": [
