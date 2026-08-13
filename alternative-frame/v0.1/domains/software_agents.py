@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ast
 import difflib
+import importlib.util
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 from core.agents import Agent, AgentRegistry
@@ -44,6 +46,45 @@ def _write_file(tools, path, content):
         {"action": "write", "path": path, "content": content},
     )
     return result, _record(result, {"action": "write", "path": path})
+
+
+def _invalidate_python_cache_for_source(tools, path: str):
+    registry_tools = getattr(tools, "_tools", {})
+    file_editor = registry_tools.get("file_editor")
+    workspace = getattr(file_editor, "workspace", None)
+    if workspace is None:
+        return {
+            "tool": "python_cache",
+            "arguments": {"path": path},
+            "success": False,
+            "exit_code": 1,
+            "output_summary": "file_editor workspace unavailable",
+            "metadata": {"path": path},
+        }
+
+    source = (Path(workspace) / path).resolve()
+    cache = Path(importlib.util.cache_from_source(str(source)))
+    existed = cache.exists()
+    try:
+        cache.unlink(missing_ok=True)
+    except OSError as exc:
+        return {
+            "tool": "python_cache",
+            "arguments": {"path": path, "cache": str(cache)},
+            "success": False,
+            "exit_code": 1,
+            "output_summary": f"{type(exc).__name__}: {exc}",
+            "metadata": {"path": path, "cache": str(cache), "existed": existed},
+        }
+
+    return {
+        "tool": "python_cache",
+        "arguments": {"path": path, "cache": str(cache)},
+        "success": True,
+        "exit_code": 0,
+        "output_summary": "Invalidated source bytecode cache.",
+        "metadata": {"path": path, "cache": str(cache), "existed": existed},
+    }
 
 
 def _run_tests(tools):
@@ -119,7 +160,20 @@ class SoftwareAgent(Agent):
         if isinstance(feedback, dict):
             self.retry_feedback.append(feedback)
 
-        return software_handler(task, self.tools, self.state)
+        result = software_handler(task, self.tools, self.state)
+        if isinstance(feedback, dict):
+            result.evidence.append("structured_retry_feedback_received")
+            result.tool_records.append(
+                {
+                    "tool": "retry_feedback",
+                    "arguments": feedback,
+                    "success": True,
+                    "exit_code": 0,
+                    "output_summary": "Structured retry feedback was supplied to the domain agent.",
+                    "metadata": {"feedback": feedback},
+                }
+            )
+        return result
 
 
 def software_handler(task: SubTask, tools, state: SoftwareRunState) -> AgentResult:
@@ -279,11 +333,22 @@ def software_handler(task: SubTask, tools, state: SoftwareRunState) -> AgentResu
                 tool_records=[read_record, write_record],
             )
 
+        cache_record = _invalidate_python_cache_for_source(tools, "app.py")
+        if not cache_record["success"]:
+            return _failed(
+                task,
+                "Failed to invalidate app.py bytecode cache after source rewrite",
+                [cache_record["output_summary"]],
+                artifacts=write.metadata.get("artifacts", []),
+                evidence=["source_updated", "pycache_invalidation_failed"],
+                tool_records=[read_record, write_record, cache_record],
+            )
+
         test_result, test_record = _run_tests(tools)
         state.test_output = test_result.output or test_result.error or ""
         state.test_exit_code = test_result.exit_code
 
-        records = [read_record, write_record, test_record]
+        records = [read_record, write_record, cache_record, test_record]
         artifacts = write.metadata.get("artifacts", [])
 
         if test_result.success and state.test_exit_code == 0:
