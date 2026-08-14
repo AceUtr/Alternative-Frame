@@ -65,6 +65,18 @@ def _task_attempts(state: dict[str, Any], task_id: str) -> int:
     if attempts:
         return attempts
 
+    # LongHorizonState persists tool evidence, but its PhaseRecord intentionally
+    # stores summary metadata rather than each AgentResult. Retry feedback carries
+    # the next attempt number, so it is the durable source for this CLI evidence.
+    for record in state.get("evidence_records", []):
+        if record.get("tool") != "retry_feedback":
+            continue
+        arguments = record.get("arguments")
+        if isinstance(arguments, dict):
+            attempts = max(attempts, int(arguments.get("attempt", 0)))
+    if attempts:
+        return attempts
+
     for completed in state.get("completed_tasks", []):
         if str(completed).endswith(f":{task_id}"):
             attempts = max(attempts, 1)
@@ -77,6 +89,37 @@ def _find_retry_feedback(state: dict[str, Any]) -> list[dict[str, Any]]:
         if record.get("tool") == "retry_feedback":
             feedback.append(record)
     return feedback
+
+
+def _find_retry_summary(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for event in events:
+        if event.get("event") == "retry_summary":
+            payload = event.get("payload")
+            if isinstance(payload, dict):
+                return payload
+    return None
+
+
+def _record_retry_summary(
+    controller: LongHorizonController,
+    run_id: str,
+    attempts: int,
+    feedback: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if _find_retry_summary(events) or not feedback:
+        return events
+
+    controller.store.append_event(
+        run_id,
+        "retry_summary",
+        {
+            "task": "implement_fix",
+            "attempts": attempts,
+            "retry_feedback": feedback,
+        },
+    )
+    return _read_events(controller.store.run_dir(run_id))
 
 
 def _find_local_recovery(events: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -186,6 +229,13 @@ def run_demo(scenario: str, state_dir: str | None = None) -> int:
     if scenario == "retry-once":
         attempts = _task_attempts(state, "implement_fix")
         feedback = _find_retry_feedback(state)
+        events = _record_retry_summary(
+            controller,
+            run_id,
+            attempts,
+            feedback,
+            events,
+        )
         print(f"implement_fix attempts={attempts}")
         print(f"structured retry_feedback={feedback[0] if feedback else None}")
         if attempts != 2:

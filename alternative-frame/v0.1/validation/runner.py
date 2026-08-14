@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -218,9 +219,10 @@ class ContributionValidator:
             started = time.perf_counter()
             env = dict(os.environ)
             env["PYTHONDONTWRITEBYTECODE"] = "1"
+            executable_command = self._resolve_command(command)
             try:
                 completed = subprocess.run(
-                    command,
+                    executable_command,
                     cwd=self.root,
                     capture_output=True,
                     text=True,
@@ -246,6 +248,13 @@ class ContributionValidator:
         for key in ("required_files", "import_modules", "test_commands", "scan_paths"):
             if key in manifest and not isinstance(manifest[key], list):
                 raise ValueError(f"manifest {key} must be a list")
+
+    @staticmethod
+    def _resolve_command(command: list[str]) -> list[str]:
+        resolved = list(command)
+        if resolved[0] == "python":
+            resolved[0] = sys.executable
+        return resolved
 
     @staticmethod
     def _compact(value: str, limit: int = 1200) -> str:
