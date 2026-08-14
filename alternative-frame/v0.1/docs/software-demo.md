@@ -12,8 +12,8 @@ so the flow is deterministic, offline, and fast enough for live presentation.
 - Fixture paths: `examples/software_task/app.py` and `examples/software_task/test_app.py`
 - Runtime workspace: a temporary directory under the OS temp folder by default.
 - Runtime artifacts: `<runtime-root>/workspace/artifacts/`
-- Long-horizon state: `<runtime-root>/runs/software-demo/state.json`
-- Event log: `<runtime-root>/runs/software-demo/events.jsonl`
+- Long-horizon state: `<runtime-root>/state.json`
+- Event log: `<runtime-root>/events.jsonl`
 
 `SoftwareDomainAdapter.reset_workspace()` resets the fixture before each run,
 removes stale runtime artifacts, and recreates `app.py`, `test_app.py`, and
@@ -130,24 +130,27 @@ Current expected result:
 
 ```text
 validate_contribution.py --domain software: passed
-tests/test_software_demo.py: 10 passed
+tests/test_software_demo.py: 15 passed
 all three fault scenarios: completed
 ```
 
 The contribution validator checks required files, imports, the
 `SoftwareDomainAdapter` interface, preflight readiness, sensitive data, unit
-tests, and smoke execution.
+tests, and a smoke script that runs all three CLI scenarios and verifies their
+runtime artifacts.
 
 ## Evidence Artifacts
 
 Each successful run creates:
 
-- `artifacts/requirement_analysis.md`
-- `artifacts/architecture_design.md`
-- `artifacts/diagnosis.md`
-- `artifacts/software_report.md`
-- `artifacts/code_diff.patch`
-- `artifacts/test_log.txt`
+- `<runtime-root>/state.json`
+- `<runtime-root>/events.jsonl`
+- `<runtime-root>/workspace/artifacts/requirement_analysis.md`
+- `<runtime-root>/workspace/artifacts/architecture_design.md`
+- `<runtime-root>/workspace/artifacts/diagnosis.md`
+- `<runtime-root>/workspace/artifacts/software_report.md`
+- `<runtime-root>/workspace/artifacts/code_diff.patch`
+- `<runtime-root>/workspace/artifacts/test_log.txt`
 
 These artifacts are written inside the temporary runtime workspace, not to the
 tracked fixture directory.
