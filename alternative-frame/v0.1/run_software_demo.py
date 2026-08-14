@@ -1,415 +1,239 @@
+"""Run the deterministic, offline software engineering demonstration."""
+
 from __future__ import annotations
 
-import ast
-import difflib
-from dataclasses import dataclass
-from typing import Any, Mapping
+import argparse
+import json
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
-from core.agents import Agent, AgentRegistry
-from core.models import AgentResult, SubTask
-
-
-PYTEST_COMMAND = "python -m pytest test_app.py -q -p no:cacheprovider"
-
-
-@dataclass
-class SoftwareRunState:
-    before_code: str = ""
-    after_code: str = ""
-    test_output: str = ""
-    test_exit_code: int | None = None
-
-
-def _record(tool_result, arguments=None):
-    return {
-        "tool": tool_result.tool,
-        "arguments": arguments or {},
-        "success": tool_result.success,
-        "exit_code": tool_result.exit_code,
-        "output_summary": (tool_result.output or tool_result.error or "")[-1000:],
-        "metadata": tool_result.metadata,
-    }
+from core.acceptance import AcceptanceEvaluator
+from core.local_recovery import LocalDAGRecoveryController
+from core.long_horizon import (
+    DeterministicGlobalEvaluator,
+    LongHorizonController,
+    LongHorizonStore,
+)
+from core.orchestrator import Orchestrator
+from domains.software_demo import SoftwareDomainAdapter
 
 
-def _read_file(tools, path):
-    result = tools.execute("file_editor", {"action": "read", "path": path})
-    if not result.success:
-        raise RuntimeError(result.error or result.output)
-    return result.output, _record(result, {"action": "read", "path": path})
+GOAL = "Repair the supplied buggy application and prove the exact test command passes"
+SCENARIOS = ("none", "retry-once", "local-recovery")
+REQUIRED_ARTIFACTS = (
+    "workspace/artifacts/software_report.md",
+    "workspace/artifacts/code_diff.patch",
+    "workspace/artifacts/test_log.txt",
+)
 
 
-def _write_file(tools, path, content):
-    result = tools.execute(
-        "file_editor",
-        {"action": "write", "path": path, "content": content},
+def _new_run_id(scenario: str) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    return f"{scenario}-{stamp}"
+
+
+def _runtime_base(state_dir: str | None) -> Path:
+    if state_dir:
+        return Path(state_dir).resolve()
+    return Path(tempfile.gettempdir()).resolve() / "alternative-frame-software-demo"
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_events(runtime_root: Path) -> list[dict[str, Any]]:
+    events_path = runtime_root / "events.jsonl"
+    if not events_path.is_file():
+        return []
+    return [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _task_attempts(state: dict[str, Any], task_id: str) -> int:
+    attempts = 0
+    for phase in state.get("phases", []):
+        for record in phase.get("tasks", []):
+            if record.get("id") == task_id:
+                attempts = max(attempts, int(record.get("attempts", 0)))
+    if attempts:
+        return attempts
+
+    for completed in state.get("completed_tasks", []):
+        if str(completed).endswith(f":{task_id}"):
+            attempts = max(attempts, 1)
+    return attempts
+
+
+def _find_retry_feedback(state: dict[str, Any]) -> list[dict[str, Any]]:
+    feedback = []
+    for record in state.get("evidence_records", []):
+        if record.get("tool") == "retry_feedback":
+            feedback.append(record)
+    return feedback
+
+
+def _find_local_recovery(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for event in events:
+        if event.get("event") == "local_recovery_started":
+            payload = event.get("payload")
+            if isinstance(payload, dict):
+                return payload
+    return None
+
+
+def _validate_common_artifacts(runtime_root: Path) -> list[str]:
+    failures = []
+
+    state_path = runtime_root / "state.json"
+    events_path = runtime_root / "events.jsonl"
+
+    if not runtime_root.is_dir():
+        failures.append(f"runtime root does not exist: {runtime_root}")
+    if not state_path.is_file():
+        failures.append(f"missing state.json: {state_path}")
+    if not events_path.is_file():
+        failures.append(f"missing events.jsonl: {events_path}")
+
+    for artifact in REQUIRED_ARTIFACTS:
+        path = runtime_root / artifact
+        if not path.is_file():
+            failures.append(f"missing artifact: {path}")
+
+    if state_path.is_file():
+        state = _read_json(state_path)
+        if state.get("status") != "completed":
+            failures.append(f"state status is not completed: {state.get('status')}")
+        if int(state.get("phase", 0)) < 1:
+            failures.append("phase count is not positive")
+        if not state.get("completed_tasks"):
+            failures.append("state has no completed_tasks")
+        if "last_evaluation" not in state:
+            failures.append("state has no acceptance evaluation")
+
+    return failures
+
+
+def _build_controller(scenario: str, runtime_base: Path, run_id: str):
+    adapter = SoftwareDomainAdapter()
+    runtime_root = runtime_base / run_id
+    workspace = runtime_root / "workspace"
+    adapter.reset_workspace(workspace)
+    tools, agents = adapter.configure(workspace, model_client=None)
+
+    if scenario == "local-recovery":
+        plan = adapter.build_plan(GOAL)
+        for task in plan.subtasks:
+            if task.id == "run_targeted_tests":
+                task.metadata["fault_scenario"] = scenario
+    else:
+        plan = adapter.build_initial_plan(GOAL)
+        if scenario == "retry-once":
+            for task in plan.subtasks:
+                if task.id == "implement_fix":
+                    task.metadata["fault_scenario"] = scenario
+
+    contract = adapter.build_contract(GOAL)
+
+    orchestrator = Orchestrator(
+        agents,
+        acceptance=AcceptanceEvaluator(workspace),
     )
-    return result, _record(result, {"action": "write", "path": path})
 
+    local_recovery = None
+    if scenario == "local-recovery":
+        local_recovery = LocalDAGRecoveryController(orchestrator, max_cycles=1)
 
-def _run_tests(tools):
-    arguments = {"command": PYTEST_COMMAND}
-    result = tools.execute("test_runner", arguments)
-    return result, _record(result, arguments)
+    def replan(_state, evaluation):
+        return adapter.build_recovery_plan(GOAL, evaluation.missing_criteria)
 
-
-def _success(task, summary, artifacts=None, evidence=None, tool_records=None):
-    return AgentResult(
-        subtask_id=task.id,
-        status="success",
-        summary=summary,
-        artifacts=artifacts or [],
-        evidence=evidence or [],
-        tool_records=tool_records or [],
+    controller = LongHorizonController(
+        orchestrator=orchestrator,
+        initial_planner=lambda _state: plan,
+        store=LongHorizonStore(runtime_base),
+        evaluator=DeterministicGlobalEvaluator(contract, workspace),
+        replanner=replan,
+        max_phases=2,
+        max_total_tasks=16,
+        acceptance_contract=contract.to_dict(),
+        local_recovery=local_recovery,
     )
+    return controller, runtime_root
 
 
-def _failed(task, summary, failures, artifacts=None, evidence=None, tool_records=None):
-    return AgentResult(
-        subtask_id=task.id,
-        status="failed",
-        summary=summary,
-        artifacts=artifacts or [],
-        evidence=evidence or [],
-        tool_records=tool_records or [],
-        failures=failures,
-    )
+def run_demo(scenario: str, state_dir: str | None = None) -> int:
+    runtime_base = _runtime_base(state_dir)
+    run_id = _new_run_id(scenario)
+    controller, runtime_root = _build_controller(scenario, runtime_base, run_id)
 
+    report = controller.run(GOAL, run_id=run_id, resume=False)
+    state_path = runtime_root / "state.json"
+    state = _read_json(state_path) if state_path.is_file() else report.state.to_dict()
+    events = _read_events(runtime_root)
 
-def _rewrite_add_implementation(source: str, operator: ast.operator) -> str:
-    tree = ast.parse(source)
+    print(f"Status: {report.state.status}")
+    print(f"Phase count: {report.state.phase}")
+    print(f"Runtime root: {runtime_root}")
 
-    for node in tree.body:
-        if not isinstance(node, ast.FunctionDef) or node.name != "add":
-            continue
+    failures = _validate_common_artifacts(runtime_root)
 
-        argument_names = [argument.arg for argument in node.args.args]
-        if argument_names[:2] != ["a", "b"]:
-            continue
+    if scenario == "retry-once":
+        attempts = _task_attempts(state, "implement_fix")
+        feedback = _find_retry_feedback(state)
+        print(f"implement_fix attempts={attempts}")
+        print(f"structured retry_feedback={feedback[0] if feedback else None}")
+        if attempts != 2:
+            failures.append(f"expected implement_fix attempts=2, got {attempts}")
+        if not feedback:
+            failures.append("missing structured retry_feedback evidence")
 
-        node.body = [
-            ast.Return(
-                value=ast.BinOp(
-                    left=ast.Name(id="a", ctx=ast.Load()),
-                    op=operator,
-                    right=ast.Name(id="b", ctx=ast.Load()),
-                )
-            )
-        ]
-        ast.fix_missing_locations(tree)
-        return ast.unparse(tree) + "\n"
-
-    raise ValueError("fixture does not define add(a, b)")
-
-
-class SoftwareAgent(Agent):
-    def __init__(self, role: str, tools, state: SoftwareRunState):
-        self.role = role
-        self.tools = tools
-        self.state = state
-        self.retry_feedback: list[dict[str, Any]] = []
-
-    def run(
-        self,
-        task: SubTask,
-        context: Mapping[str, AgentResult],
-    ) -> AgentResult:
-        feedback = task.metadata.get("retry_feedback")
-        if isinstance(feedback, dict):
-            self.retry_feedback.append(feedback)
-
-        return software_handler(task, self.tools, self.state)
-
-
-def software_handler(task: SubTask, tools, state: SoftwareRunState) -> AgentResult:
-    if task.role == "analyst":
-        requirements, read_req = _read_file(tools, "requirements.md")
-        code, read_code = _read_file(tools, "app.py")
-        analysis = (
-            "# Requirement Analysis\n\n"
-            "## Requirement\n\n"
-            f"{requirements.strip()}\n\n"
-            "## Observed Implementation\n\n"
-            "The current `add(a, b)` implementation must be checked against the tests.\n\n"
-            "```python\n"
-            f"{code.strip()}\n"
-            "```\n"
-        )
-        write, write_record = _write_file(
-            tools,
-            "artifacts/requirement_analysis.md",
-            analysis,
-        )
-        if not write.success:
-            return _failed(
-                task,
-                "Failed to write requirement analysis",
-                [write.error],
-                tool_records=[read_req, read_code, write_record],
-            )
-
-        return _success(
-            task,
-            "Requirement analysis generated",
-            artifacts=write.metadata.get("artifacts", []),
-            evidence=["requirement_analysis_generated"],
-            tool_records=[read_req, read_code, write_record],
-        )
-
-    if task.role == "architect":
-        architecture = (
-            "# Architecture Design\n\n"
-            "- `app.py` contains the calculator function under repair.\n"
-            "- `test_app.py` contains executable regression tests.\n"
-            "- `artifacts/` stores current-run analysis, diff, test log, and report evidence.\n"
-        )
-        write, write_record = _write_file(
-            tools,
-            "artifacts/architecture_design.md",
-            architecture,
-        )
-        if not write.success:
-            return _failed(
-                task,
-                "Failed to write architecture design",
-                [write.error],
-                tool_records=[write_record],
-            )
-
-        return _success(
-            task,
-            "Architecture design generated",
-            artifacts=write.metadata.get("artifacts", []),
-            evidence=["architecture_design_generated"],
-            tool_records=[write_record],
-        )
-
-    if task.role == "tester":
-        if (
-            task.id == "run_targeted_tests"
-            and task.metadata.get("fault_scenario") == "local-recovery"
-            and not task.metadata.get("local_recovery_feedback")
-        ):
-            return _failed(
-                task,
-                "Injected local recovery failure before final regression evidence.",
-                ["injected_local_recovery_failure"],
-                evidence=["local_recovery_fault_injected"],
-            )
-
-        test_result, test_record = _run_tests(tools)
-        state.test_output = test_result.output or test_result.error or ""
-        state.test_exit_code = test_result.exit_code
-
-        if task.id == "diagnose_failure":
-            diagnosis = (
-                "# Diagnosis\n\n"
-                f"- Command: `{PYTEST_COMMAND}`\n"
-                f"- Exit code: {state.test_exit_code}\n"
-                "- Result: failing baseline captured before repair.\n"
-            )
-            write, write_record = _write_file(
-                tools,
-                "artifacts/diagnosis.md",
-                diagnosis,
-            )
-            if not write.success:
-                return _failed(
-                    task,
-                    "Failed to write diagnosis",
-                    [write.error],
-                    tool_records=[test_record, write_record],
-                )
-
-            status_note = (
-                "failing baseline captured"
-                if state.test_exit_code != 0
-                else "baseline already passed"
-            )
-            return _success(
-                task,
-                status_note,
-                artifacts=write.metadata.get("artifacts", []),
-                evidence=["baseline_test_executed"],
-                tool_records=[test_record, write_record],
-            )
-
-        if test_result.success and state.test_exit_code == 0:
-            test_record["metadata"] = {
-                **test_record.get("metadata", {}),
-                "artifacts": ["test_app.py"],
-            }
-            return _success(
-                task,
-                "Regression tests passed",
-                artifacts=["test_app.py"],
-                evidence=["pytest_pass"],
-                tool_records=[test_record],
-            )
-
-        return _failed(
-            task,
-            "Regression tests failed",
-            [state.test_output],
-            evidence=["pytest_failed"],
-            tool_records=[test_record],
-        )
-
-    if task.role == "developer":
-        code, read_record = _read_file(tools, "app.py")
-        state.before_code = state.before_code or code
-
-        attempt = int(task.metadata.get("runtime_attempt", 1))
-        fault_scenario = task.metadata.get("fault_scenario", "none")
-
-        if fault_scenario == "retry-once" and attempt == 1:
-            repaired = _rewrite_add_implementation(code, ast.Mult())
+    if scenario == "local-recovery":
+        recovery = _find_local_recovery(events)
+        print(f"local recovery={recovery}")
+        if not recovery:
+            failures.append("missing local recovery event")
         else:
-            repaired = _rewrite_add_implementation(code, ast.Add())
+            if not recovery.get("frozen"):
+                failures.append("local recovery event has no frozen nodes")
+            if not recovery.get("impacted"):
+                failures.append("local recovery event has no impacted nodes")
 
-        write, write_record = _write_file(tools, "app.py", repaired)
-        state.after_code = repaired
+    if failures:
+        for failure in failures:
+            print(f"ERROR: {failure}", file=sys.stderr)
+        return 1
 
-        if not write.success:
-            return _failed(
-                task,
-                "Failed to write repaired source",
-                [write.error],
-                tool_records=[read_record, write_record],
-            )
+    return 0
 
-        test_result, test_record = _run_tests(tools)
-        state.test_output = test_result.output or test_result.error or ""
-        state.test_exit_code = test_result.exit_code
 
-        records = [read_record, write_record, test_record]
-        artifacts = write.metadata.get("artifacts", [])
-
-        if test_result.success and state.test_exit_code == 0:
-            evidence = ["source_updated", "pytest_pass"]
-            if task.metadata.get("retry_feedback"):
-                evidence.append("retry_feedback_received")
-
-            return _success(
-                task,
-                "Source code modified and exact tests passed",
-                artifacts=artifacts,
-                evidence=evidence,
-                tool_records=records,
-            )
-
-        return _failed(
-            task,
-            "Source code modified but exact tests failed",
-            [state.test_output],
-            artifacts=artifacts,
-            evidence=["source_updated", "pytest_failed"],
-            tool_records=records,
-        )
-
-    if task.role == "reviewer":
-        code, read_record = _read_file(tools, "app.py")
-        if "return a + b" in code:
-            return _success(
-                task,
-                "Code review verified the repaired implementation uses `return a + b`.",
-                evidence=["review_complete"],
-                tool_records=[read_record],
-            )
-
-        return _failed(
-            task,
-            "Code review found the repair incomplete",
-            ["expected `return a + b`"],
-            tool_records=[read_record],
-        )
-
-    if task.role == "reporter":
-        current_code, read_record = _read_file(tools, "app.py")
-        if not state.after_code:
-            state.after_code = current_code
-
-        diff = "\n".join(
-            difflib.unified_diff(
-                (state.before_code or "").splitlines(),
-                current_code.splitlines(),
-                fromfile="before/app.py",
-                tofile="after/app.py",
-                lineterm="",
-            )
-        )
-
-        status = "PASS" if state.test_exit_code == 0 else "FAILED"
-        report = (
-            "# Software Engineering Agent Report\n\n"
-            "## Execution Evidence\n\n"
-            f"- Status: {status}\n"
-            "- Modified file: `app.py`\n"
-            f"- Test command: `{PYTEST_COMMAND}`\n"
-            f"- Test exit code: {state.test_exit_code}\n\n"
-            "## Diff\n\n"
-            "```diff\n"
-            f"{diff}\n"
-            "```\n\n"
-            "## Test Output\n\n"
-            "```text\n"
-            f"{state.test_output.strip()}\n"
-            "```\n"
-        )
-
-        report_write, report_record = _write_file(
-            tools,
-            "artifacts/software_report.md",
-            report,
-        )
-        diff_write, diff_record = _write_file(
-            tools,
-            "artifacts/code_diff.patch",
-            diff,
-        )
-        log_write, log_record = _write_file(
-            tools,
-            "artifacts/test_log.txt",
-            state.test_output,
-        )
-
-        records = [read_record, report_record, diff_record, log_record]
-        failures = [
-            item.error
-            for item in (report_write, diff_write, log_write)
-            if not item.success
-        ]
-        if failures:
-            return _failed(
-                task,
-                "Failed to write software report artifacts",
-                failures,
-                tool_records=records,
-            )
-
-        return _success(
-            task,
-            "Software report generated from current-run test evidence",
-            artifacts=[
-                *report_write.metadata.get("artifacts", []),
-                *diff_write.metadata.get("artifacts", []),
-                *log_write.metadata.get("artifacts", []),
-            ],
-            evidence=["software_report_exists"],
-            tool_records=records,
-        )
-
-    return _failed(
-        task,
-        f"Unsupported software role: {task.role}",
-        [f"unknown role {task.role}"],
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Run the deterministic software engineering demo."
     )
+    parser.add_argument(
+        "--fault-scenario",
+        choices=SCENARIOS,
+        default="none",
+        help="Controlled fault scenario to demonstrate.",
+    )
+    parser.add_argument(
+        "--state-dir",
+        help="Optional parent directory for independent runtime roots.",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        return run_demo(args.fault_scenario, args.state_dir)
+    except Exception as exc:
+        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
 
 
-def build_software_agents(tools):
-    registry = AgentRegistry()
-    state = SoftwareRunState()
-
-    for role in ("analyst", "architect", "developer", "tester", "reviewer", "reporter"):
-        registry.register(SoftwareAgent(role, tools, state))
-
-    return registry
+if __name__ == "__main__":
+    raise SystemExit(main())
