@@ -1,6 +1,10 @@
 import subprocess
 import importlib.util
+import json
 import py_compile
+import re
+import sys
+from pathlib import Path
 
 from core.acceptance import AcceptanceEvaluator
 from core.domains import DomainRegistry
@@ -10,6 +14,9 @@ from core.models import AgentResult, SubTask
 from core.orchestrator import Orchestrator
 from core.preflight import HarnessPreflightChecker
 from domains.software_demo import PYTEST_COMMAND, SoftwareDomainAdapter
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def configure_software(tmp_path):
@@ -30,6 +37,36 @@ def failed_contract_criteria(report):
 def write_report_artifact(workspace):
     report = workspace / "artifacts" / "software_report.md"
     report.write_text("# Report\n", encoding="utf-8")
+
+
+def run_software_cli(tmp_path, *args):
+    return subprocess.run(
+        [
+            sys.executable,
+            "run_software_demo.py",
+            *args,
+            "--state-dir",
+            str(tmp_path / "runtime"),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+
+
+def runtime_root_from_output(output):
+    match = re.search(r"^Runtime root:\s*(.+)$", output, re.MULTILINE)
+    assert match, output
+    return Path(match.group(1).strip())
+
+
+def read_events(runtime_root):
+    return [
+        json.loads(line)
+        for line in (runtime_root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def test_adapter_passes_preflight(tmp_path):
@@ -74,6 +111,99 @@ def test_file_editor_rejects_workspace_escape(tmp_path):
 
     assert result.success is False
     assert "escapes workspace" in result.error
+
+
+def test_cli_default_scenario_runs_real_demo_and_writes_evidence(tmp_path):
+    completed = run_software_cli(tmp_path)
+    output = completed.stdout + completed.stderr
+
+    assert completed.returncode == 0, output
+    assert "Status: completed" in output
+    assert "Phase count: 2" in output
+    runtime_root = runtime_root_from_output(output)
+    state = json.loads((runtime_root / "state.json").read_text(encoding="utf-8"))
+
+    assert state["status"] == "completed"
+    assert state["completed_tasks"]
+    assert state["failed_tasks"] == []
+    assert state["last_evaluation"]["completed"] is True
+    assert (runtime_root / "events.jsonl").is_file()
+    assert (runtime_root / "workspace/artifacts/software_report.md").is_file()
+    assert (runtime_root / "workspace/artifacts/code_diff.patch").is_file()
+    assert (runtime_root / "workspace/artifacts/test_log.txt").is_file()
+    assert PYTEST_COMMAND in (
+        runtime_root / "workspace/artifacts/software_report.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_cli_rejects_unsupported_fault_scenario(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "run_software_demo.py",
+            "--fault-scenario",
+            "unknown",
+            "--state-dir",
+            str(tmp_path / "runtime"),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert completed.returncode != 0
+    assert "invalid choice" in completed.stderr
+
+
+def test_cli_retry_once_persists_structured_retry_feedback(tmp_path):
+    completed = run_software_cli(tmp_path, "--fault-scenario", "retry-once")
+    output = completed.stdout + completed.stderr
+
+    assert completed.returncode == 0, output
+    assert "implement_fix attempts=2" in output
+    assert "structured retry_feedback=" in output
+    runtime_root = runtime_root_from_output(output)
+    retry_events = [
+        event
+        for event in read_events(runtime_root)
+        if event["event"] == "retry_summary"
+    ]
+
+    assert retry_events
+    payload = retry_events[-1]["payload"]
+    assert payload["attempts"] == 2
+    retry_feedback = payload["retry_feedback"][0]
+    assert isinstance(retry_feedback["arguments"], dict)
+    assert retry_feedback["success"] is True
+    assert isinstance(retry_feedback["metadata"], dict)
+
+
+def test_cli_local_recovery_records_frozen_nodes_without_rerunning_them(tmp_path):
+    completed = run_software_cli(tmp_path, "--fault-scenario", "local-recovery")
+    output = completed.stdout + completed.stderr
+
+    assert completed.returncode == 0, output
+    assert "Status: completed" in output
+    runtime_root = runtime_root_from_output(output)
+    events = read_events(runtime_root)
+    recovery_started = next(
+        event for event in events if event["event"] == "local_recovery_started"
+    )
+    recovery_planned = next(
+        event for event in events if event["event"] == "local_recovery_planned"
+    )
+    frozen = recovery_started["payload"]["frozen"]
+    rerun = [task["id"] for task in recovery_planned["payload"]["tasks"]]
+
+    assert frozen == [
+        "inspect_requirements",
+        "inspect_repository",
+        "diagnose_failure",
+        "implement_fix",
+    ]
+    assert rerun == ["run_targeted_tests", "build_change_report"]
+    assert not set(frozen) & set(rerun)
 
 
 def test_software_plan_repairs_bug_and_generates_current_evidence(tmp_path):
