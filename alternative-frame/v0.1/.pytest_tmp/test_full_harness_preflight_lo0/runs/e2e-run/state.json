@@ -1,0 +1,116 @@
+{
+  "run_id": "e2e-run",
+  "goal": "deliver verified artifacts",
+  "max_phases": 3,
+  "max_total_tasks": 50,
+  "status": "completed",
+  "phase": 1,
+  "total_tasks": 4,
+  "completed_tasks": [
+    "phase-1:produce",
+    "phase-1:review"
+  ],
+  "failed_tasks": [],
+  "artifacts": [
+    "artifacts/result.txt",
+    "artifacts/evidence.md"
+  ],
+  "evidence_records": [
+    {
+      "tool": "artifact_writer",
+      "success": true,
+      "exit_code": null,
+      "metadata": {
+        "artifacts": [
+          "artifacts/result.txt"
+        ]
+      }
+    },
+    {
+      "tool": "artifact_writer",
+      "success": true,
+      "metadata": {
+        "artifacts": [
+          "artifacts/evidence.md"
+        ]
+      }
+    }
+  ],
+  "acceptance_contract": {
+    "goal": "deliver verified artifacts",
+    "goal_summary": "Produce and independently verify a result",
+    "criteria": [
+      {
+        "id": "result",
+        "description": "Result exists",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/result.txt",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "evidence",
+        "description": "Evidence exists",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/evidence.md",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      }
+    ],
+    "constraints": []
+  },
+  "decisions": [
+    "phase 1: final goal accepted - all phase tasks and their acceptance checks passed"
+  ],
+  "phases": [
+    {
+      "number": 1,
+      "plan_goal": "deliver verified artifacts",
+      "task_ids": [
+        "produce",
+        "review"
+      ],
+      "status": "accepted",
+      "report_status": "success",
+      "evaluation": {
+        "completed": true,
+        "reason": "all phase tasks and their acceptance checks passed",
+        "satisfied_criteria": [],
+        "missing_criteria": [],
+        "failures": [],
+        "next_focus": [],
+        "evidence": [
+          "phase_tasks_passed=2"
+        ]
+      },
+      "failures": [],
+      "artifacts": [
+        "artifacts/result.txt",
+        "artifacts/evidence.md"
+      ],
+      "started_at": "2026-08-14T06:01:53.679155+00:00",
+      "finished_at": "2026-08-14T06:01:53.698116+00:00",
+      "local_recovery_cycles": 1,
+      "executed_task_count": 4
+    }
+  ],
+  "pending_plan": null,
+  "last_evaluation": {
+    "completed": true,
+    "reason": "all phase tasks and their acceptance checks passed",
+    "satisfied_criteria": [],
+    "missing_criteria": [],
+    "failures": [],
+    "next_focus": [],
+    "evidence": [
+      "phase_tasks_passed=2"
+    ]
+  },
+  "last_error": null,
+  "created_at": "2026-08-14T06:01:53.670108+00:00",
+  "updated_at": "2026-08-14T06:01:53.709736+00:00"
+}

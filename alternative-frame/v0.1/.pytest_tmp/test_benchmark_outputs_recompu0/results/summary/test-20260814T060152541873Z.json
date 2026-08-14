@@ -1,0 +1,48 @@
+{
+  "benchmark_name": "test",
+  "cases": [
+    {
+      "run_count": 2,
+      "completed_run_count": 2,
+      "final_goal_completion_rate": 1.0,
+      "task_count": 6,
+      "success_count": 6,
+      "subtask_success_rate": 1.0,
+      "first_pass_count": 6,
+      "first_pass_rate": 1.0,
+      "retry_count": 0,
+      "local_recovery_count": 0,
+      "additional_phase_count": 0,
+      "mean_duration_seconds": 0.002,
+      "tool_calls": 0,
+      "successful_tool_calls": 0,
+      "tool_success_rate": null,
+      "total_tokens": 0,
+      "estimated_cost": null,
+      "human_interventions": 0,
+      "node_distribution": {
+        "device": 0,
+        "edge": 0,
+        "cloud": 0,
+        "unknown": 6
+      },
+      "node_failures": {
+        "device": 0,
+        "edge": 0,
+        "cloud": 0,
+        "unknown": 0
+      },
+      "node_durations": {
+        "device": null,
+        "edge": null,
+        "cloud": null,
+        "unknown": 0.0
+      },
+      "case_name": "research",
+      "run_ids": [
+        "research-20260814T060152541873Z-1-512f8f",
+        "research-20260814T060152541873Z-2-6d0cfa"
+      ]
+    }
+  ]
+}
