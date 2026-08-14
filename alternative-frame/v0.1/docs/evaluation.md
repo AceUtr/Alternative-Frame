@@ -1,81 +1,199 @@
-# 统一评测与指标说明
+﻿# Evaluation Methodology
 
-## 1. 目标
+## 1. Purpose
 
-本模块为科研 Demo、软件工程 Demo 和端边云 Demo 提供同一套可追溯指标。所有聚合结果必须能够回溯至 `run_id`、`state.json`、`events.jsonl`、`AgentResult`、`tool_records` 或 `runs/results.jsonl`。
+The evaluation layer measures whether Alternative-Frame improves
+execution reliability, recovery behavior, contract correctness,
+and orchestration efficiency.
 
-当前完成的是阶段 D1：指标 Schema、基础采集、兼容读取和测试。Benchmark、图表、UI 和比赛脚本在后续阶段实现。
+Evaluation evidence is deliberately separated by evidence class.
+Results from different evidence classes must not be silently mixed.
 
-## 2. 指标定义
+## 2. Evidence Classes
 
-| 指标 | 计算规则 | 空值规则 |
-|---|---|---|
-| 最终目标完成率 | `final_goal_completed=True` 的已知运行数 / 最终状态已知的运行数 | 没有已知运行时为 `null` |
-| 子任务成功率 | success 子任务数 / 已执行子任务数 | 分母为 0 时为 `null` |
-| 首次通过率 | success 且 `attempts == 1` 的子任务数 / 已执行子任务数 | 分母为 0 时为 `null` |
-| 重试次数 | 所有任务 `max(attempts - 1, 0)` 之和 | 无任务时为 0 |
-| 局部恢复次数 | `RunReport.local_recovery_cycles` 或各 `PhaseRecord.local_recovery_cycles` 之和 | 无记录时为 0 |
-| 跨阶段次数 | `max(phase_count - 1, 0)` | 初始阶段不计为跨阶段 |
-| 总耗时 | 运行开始至最终状态的墙钟时间 | 无法计算时为 `null`；旧接口保持浮点秒数 |
-| 模型调用与 Token | 从模型响应或工具记录中的 `usage` 获取 | 未采集到为 `null`，不得写成真实 0 |
-| 估算成本 | 仅在配置了明确模型价格后计算 | 无价格配置为 `null` |
-| 工具调用成功率 | `success is True` 的工具记录数 / 工具记录总数 | 无工具调用时为 `null` |
-| 人工干预次数 | 合同修改、暂停、人工重跑等已定义事件数 | 尚未接入事件映射时为 0，并在报告中说明 |
-| 节点分布 | device/edge/cloud/unknown 的任务数 | 未提供节点字段归入 unknown |
+### deterministic_controlled_run
 
-`0`、`null`（unknown）和“不适用”不能混用。
+A controlled experiment with deterministic task behavior.
 
-## 3. 当前数据来源
+Used for:
 
-| 数据 | 来源 | 当前状态 |
-|---|---|---|
-| 任务状态、重试次数 | `core/models.py` 的 `AgentResult.status/attempts` | 已接入 |
-| 工具调用与成功状态 | `AgentResult.tool_records` | 已接入 |
-| 单任务起止时间 | `AgentResult.started_at/finished_at` | 已接入 |
-| 局部恢复次数 | `RunReport.local_recovery_cycles`、`PhaseRecord.local_recovery_cycles` | 已接入 |
-| 阶段数量 | `LongHorizonState.phases` | 已接入 |
-| 最终目标状态 | 普通运行 `RunReport.status`；长程运行 `LongHorizonState.status` | 已接入 |
-| Token usage | 工具/模型记录中的 `usage` | 解析已支持；上游仍可能未写入 |
-| 节点 device/edge/cloud | task/result metadata 或未来 C 模块字段 | Schema 已预留，当前大多为 unknown |
-| 人工干预事件 | `events.jsonl` | 规则尚需与队长确认 |
-| 成本 | 显式模型价格表 | 尚未配置，因此为 unknown |
+- Single Agent vs Multi Agent orchestration topology.
+- Recovery OFF vs local recovery ON.
+- Contract validation OFF vs ON.
 
-## 4. Schema
+These runs are suitable for mechanism-level claims because the
+input, task behavior, and injected failures are controlled.
 
-`RunMetrics.schema_version` 当前为 `1.0`。核心对象：
+They are not evidence of superior LLM reasoning quality.
 
-- `TaskMetrics`：单个子任务状态、尝试次数、时延、节点和调用统计。
-- `CallMetrics`：单次模型/API/工具调用统计。
-- `RunMetrics`：单次运行的原始和派生指标。
-- `EvaluationSummary`：多次运行的聚合结果。
+### recorded_real_run
 
-写入格式为 append-only JSONL。每行是一条独立运行记录。
+Historical runs produced by the actual research-demo execution
+pipeline.
 
-## 5. 兼容与安全
+These runs demonstrate that project mechanisms such as local
+recovery and multi-phase contract completion have occurred in
+real project execution.
 
-- 旧版没有 `schema_version` 的 `runs/results.jsonl` 可继续读取，并标记为 `0.1`。
-- 坏行会被跳过，不影响其他有效记录。
-- `api_key`、`authorization`、`token`、`password`、`secret` 等字段在持久化前递归替换为 `[REDACTED]`。
-- 旧记录中的 Token=0 可能代表未采集，读取后通过 metadata 标记歧义。
+They are observational evidence and must not be presented as
+controlled treatment-vs-control experiments.
 
-## 6. 当前尚未完成
+### live_real_run
 
-1. 模型客户端需要把真实响应 usage 写入可采集记录。
-2. C 模块需要提供统一节点字段，建议使用 `deployment_target`，取值为 `device/edge/cloud`。
-3. 人工干预事件的精确定义和映射需要队长确认。
-4. 成本计算需要显式模型价格配置。
-5. Benchmark Runner、CSV/JSON 汇总、图表和 UI 属于 D2-D4。
+Live model-driven benchmark runs.
 
-## 7. 测试
+These require an API model and will be added separately.
 
-在 `alternative-frame/v0.1` 下执行：
+No live-model claim should be made until those experiments have
+actually been executed.
 
-```bash
-python -m pytest tests/test_metrics.py -q
-```
+## 3. Core Metrics
 
-完整回归：
+The evaluation schema records:
 
-```bash
-python -m pytest -q
-```
+- Final goal completion.
+- Task count.
+- Successful tasks.
+- Failed tasks.
+- First-pass success count.
+- Retry count.
+- Local recovery count.
+- Phase count.
+- Additional phase count.
+- Wall-clock duration.
+- Model-call count.
+- Prompt tokens.
+- Completion tokens.
+- Total tokens.
+- Estimated cost.
+- Tool-call count.
+- Successful tool calls.
+- Human interventions.
+- Device task count.
+- Edge task count.
+- Cloud task count.
+- Unknown-node task count.
+- Per-node failure counts.
+- Per-node duration.
+
+## 4. Unknown Values
+
+Missing observations must not be converted into numeric zero.
+
+For example:
+
+- no token telemetry -> token count is unknown;
+- no model pricing -> estimated cost is unknown;
+- no routing evidence -> node placement is unknown.
+
+Zero means a value was observed and measured as zero.
+
+Unknown means the value was not available.
+
+## 5. Controlled Experiments
+
+### 5.1 Single Agent vs Multi Agent
+
+Current deterministic evidence compares:
+
+- one serialized universal backend;
+- multiple role-specific backends.
+
+Both conditions use the same DAG, task implementation,
+success criteria, Orchestrator, and parallel scheduling policy.
+
+Current evidence establishes orchestration parallelism benefit,
+not superior language-model reasoning quality.
+
+### 5.2 Recovery OFF vs Recovery ON
+
+A deterministic failure is injected into the `compute` node of:
+
+`prepare -> compute -> verify`
+
+With recovery disabled, the workflow remains failed.
+
+With local recovery enabled:
+
+- the failed node is identified;
+- the blocked downstream node is identified;
+- the successful predecessor is frozen;
+- only the impacted subgraph is rerun.
+
+The experiment therefore measures both recoverability and
+recovery locality.
+
+### 5.3 Contract Validation OFF vs ON
+
+Both conditions receive the same successful phase report.
+
+The workspace contains:
+
+- `calculator.py`;
+- provenance for `calculator.py`;
+- exact successful test-command evidence.
+
+`FINAL_EVIDENCE.md` is deliberately missing.
+
+Without the contract gate, the successful phase is declared
+complete.
+
+With the contract gate, completion is rejected because the
+`final_evidence` criterion is missing.
+
+This demonstrates prevention of false completion.
+
+### 5.4 Fixed vs Dynamic Device/Edge/Cloud Routing
+
+Pending integration with the routing interface owned by the
+routing module.
+
+No routing-performance claim should be made until the routing
+policy and node-placement evidence are available.
+
+## 6. Recorded Research Evidence
+
+Two real recorded research runs are currently available.
+
+They demonstrate:
+
+- final goal completion;
+- multi-phase execution;
+- contract completion after additional work;
+- a real local-recovery event in the recovery sample.
+
+The recovery sample contains cumulative planning work introduced
+by recovery.
+
+Therefore `8 / 11` must not be interpreted as a 72.7% final-goal
+completion rate.
+
+## 7. Reproducibility
+
+Benchmark outputs are stored separately from benchmark source code.
+
+Generated run outputs must not overwrite previous raw evidence.
+
+Each benchmark run should use:
+
+- a unique run ID;
+- an isolated workspace;
+- append-only raw results;
+- separately generated summaries.
+
+## 8. Current Validation Status
+
+D evaluation tests currently cover:
+
+- metric extraction;
+- real recorded samples;
+- benchmark execution;
+- evaluation reports;
+- recovery modes;
+- deterministic recovery ablation;
+- deterministic contract ablation;
+- unified evaluation;
+- deterministic agent-topology ablation;
+- UI evaluation views.
+
+Live LLM and device/edge/cloud experiments remain pending.
