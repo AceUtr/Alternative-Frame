@@ -1,12 +1,4 @@
-﻿"""Read-only evaluation views for the competition UI.
-
-This module deliberately does not modify core execution state.
-It only reads generated evaluation artifacts and converts them
-into presentation-friendly structures.
-
-The main UI may import these helpers without coupling benchmark
-logic to Tkinter.
-"""
+﻿"""Read-only evaluation views for the competition UI."""
 
 from __future__ import annotations
 
@@ -16,7 +8,7 @@ from typing import Any, Dict, List
 
 
 DEFAULT_REPORT = Path(
-    "reports/unified_evaluation_v2/"
+    "reports/competition_final/"
     "competition_evaluation.json"
 )
 
@@ -36,22 +28,27 @@ def load_competition_evaluation(
     )
 
 
+def _experiment_rows(
+    payload: Dict[str, Any],
+    experiment: str,
+) -> Dict[str, Dict[str, Any]]:
+    return {
+        row["condition"]: row
+        for row in payload.get("rows", [])
+        if row.get("experiment") == experiment
+    }
+
+
 def agent_summary(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    rows = [
-        row
-        for row in payload.get("rows", [])
-        if row.get("experiment") == "agent_topology"
-    ]
+    rows = _experiment_rows(
+        payload,
+        "agent_topology",
+    )
 
-    lookup = {
-        row["condition"]: row
-        for row in rows
-    }
-
-    single = lookup.get("single_agent", {})
-    multi = lookup.get("multi_agent", {})
+    single = rows.get("single_agent", {})
+    multi = rows.get("multi_agent", {})
 
     single_duration = single.get(
         "mean_duration_seconds"
@@ -60,9 +57,12 @@ def agent_summary(
         "mean_duration_seconds"
     )
 
-    speedup = None
+    # Final competition report stores the latest value directly.
+    speedup = payload.get(
+        "agent_speedup"
+    )
 
-    if (
+    if speedup is None and (
         isinstance(single_duration, (int, float))
         and isinstance(multi_duration, (int, float))
         and multi_duration > 0
@@ -93,63 +93,110 @@ def agent_summary(
 def recovery_summary(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    rows = [
-        row
-        for row in payload.get("rows", [])
-        if row.get("experiment") == "local_recovery"
-    ]
+    rows = _experiment_rows(
+        payload,
+        "local_recovery",
+    )
 
-    lookup = {
-        row["condition"]: row
-        for row in rows
-    }
-
-    off = lookup.get("recovery_off", {})
-    on = lookup.get("recovery_on", {})
+    off = rows.get("recovery_off", {})
+    on = rows.get("recovery_on", {})
 
     return {
         "off_completed": bool(
-            off.get("goal_completion_rate")
+            off.get(
+                "completed",
+                off.get("goal_completion_rate"),
+            )
         ),
         "on_completed": bool(
-            on.get("goal_completion_rate")
+            on.get(
+                "completed",
+                on.get("goal_completion_rate"),
+            )
         ),
-        "off_result": off.get("key_result"),
-        "on_result": on.get("key_result"),
+        "off_result": off.get("result")
+        or off.get("key_result"),
+        "on_result": on.get("result")
+        or on.get("key_result"),
     }
 
 
 def contract_summary(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    rows = [
-        row
-        for row in payload.get("rows", [])
-        if row.get("experiment")
-        == "contract_validation"
-    ]
+    rows = _experiment_rows(
+        payload,
+        "contract_validation",
+    )
 
-    lookup = {
-        row["condition"]: row
-        for row in rows
-    }
-
-    off = lookup.get("contract_off", {})
-    on = lookup.get("contract_on", {})
+    off = rows.get("contract_off", {})
+    on = rows.get("contract_on", {})
 
     return {
         "without_contract_declared_complete": bool(
-            off.get("goal_completion_rate")
+            off.get(
+                "completed",
+                off.get("goal_completion_rate"),
+            )
         ),
         "with_contract_declared_complete": bool(
-            on.get("goal_completion_rate")
+            on.get(
+                "completed",
+                on.get("goal_completion_rate"),
+            )
         ),
-        "without_contract_result": off.get(
-            "key_result"
+        "without_contract_result": off.get("result")
+        or off.get("key_result"),
+        "with_contract_result": on.get("result")
+        or on.get("key_result"),
+    }
+
+
+def routing_summary(
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    rows = _experiment_rows(
+        payload,
+        "routing",
+    )
+
+    fixed = rows.get("fixed_cloud", {})
+    dynamic = rows.get("dynamic_routing", {})
+
+    routing_result = payload.get(
+        "routing_result",
+        {},
+    )
+
+    return {
+        "fixed_completed": bool(
+            fixed.get(
+                "completed",
+                routing_result.get(
+                    "fixed_cloud_completed"
+                ),
+            )
         ),
-        "with_contract_result": on.get(
-            "key_result"
+        "dynamic_completed": bool(
+            dynamic.get(
+                "completed",
+                routing_result.get(
+                    "dynamic_completed"
+                ),
+            )
         ),
+        "dynamic_final_node": (
+            routing_result.get(
+                "dynamic_final_node"
+            )
+        ),
+        "fallback_count": (
+            routing_result.get(
+                "fallback_count"
+            )
+        ),
+        "fixed_result": fixed.get("result"),
+        "dynamic_result": dynamic.get("result"),
     }
 
 
@@ -159,6 +206,7 @@ def overview_cards(
     agent = agent_summary(payload)
     recovery = recovery_summary(payload)
     contract = contract_summary(payload)
+    routing = routing_summary(payload)
 
     speedup = agent.get(
         "wall_clock_speedup"
@@ -168,6 +216,12 @@ def overview_cards(
         f"{speedup:.3f}x"
         if isinstance(speedup, (int, float))
         else "unknown"
+    )
+
+    routing_pass = (
+        not routing["fixed_completed"]
+        and routing["dynamic_completed"]
+        and routing["dynamic_final_node"] == "edge"
     )
 
     return [
@@ -212,17 +266,23 @@ def overview_cards(
             ),
         },
         {
-            "title": "Live LLM",
+            "title": "Dynamic Routing",
             "value": (
-                "AVAILABLE"
-                if payload.get(
-                    "live_llm_available"
-                )
-                else "PENDING"
+                "PASS"
+                if routing_pass
+                else "CHECK"
             ),
             "detail": (
-                "Live API ablations are kept "
-                "separate from deterministic evidence"
+                "Fixed Cloud failed; "
+                "Cloud→Edge fallback completed"
+            ),
+        },
+        {
+            "title": "Live LLM",
+            "value": "PENDING",
+            "detail": (
+                "Optional live-model evidence "
+                "remains separate"
             ),
         },
     ]
@@ -249,11 +309,6 @@ def create_tk_evaluation_panel(
     parent,
     path: str | Path = DEFAULT_REPORT,
 ):
-    """Optional Tkinter panel for the main UI.
-
-    Main UI owners can import this function without
-    changing any benchmark execution logic.
-    """
     import tkinter as tk
     from tkinter import ttk
 
@@ -271,7 +326,7 @@ def create_tk_evaluation_panel(
 
     text = tk.Text(
         frame,
-        height=14,
+        height=16,
         width=70,
         wrap="word",
     )

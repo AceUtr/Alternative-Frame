@@ -1,0 +1,6 @@
+﻿{
+  "name": "deterministic_routing_ablation",
+  "description": "Controlled fixed-cloud vs dynamic device-edge-cloud routing under an injected cloud outage.",
+  "evidence_kind": "deterministic_controlled_run",
+  "modes": ["fixed_cloud", "dynamic_routing"]
+}

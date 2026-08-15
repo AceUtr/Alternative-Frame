@@ -51,3 +51,6 @@ alternative-frame/v0.1/runs/recovery_ablation/
 # C edge-cloud runtime workspaces
 alternative-frame/v0.1/runs/edge_cloud_long_horizon/*
 alternative-frame/v0.1/runs/edge_cloud_replan/*
+
+# Final competition generated report
+alternative-frame/v0.1/reports/competition_final/

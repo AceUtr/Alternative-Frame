@@ -218,3 +218,56 @@ If a live demo fails:
 
 The fallback itself demonstrates the project's persistence,
 auditability, and evaluation discipline.
+
+## Final Routing Demo Update
+
+The Device / Edge / Cloud section is now available.
+
+Show the controlled Cloud outage comparison.
+
+### Fixed Cloud
+
+Display:
+
+`completed=False`
+`final_node=cloud`
+`fallback=0`
+`attempts=1`
+
+Explain:
+
+The fixed policy has no alternate execution target. The injected Cloud
+failure therefore becomes a final workflow failure.
+
+### Dynamic Routing
+
+Display:
+
+`completed=True`
+`final_node=edge`
+`fallback=1`
+`attempts=2`
+
+Execution trace:
+
+`Cloud attempt -> injected failure -> Edge fallback -> success`
+
+Explain that the failed Cloud attempt remains visible in telemetry; the
+system does not hide or overwrite the failure.
+
+Also mention the other C routing guarantees demonstrated by the runtime:
+
+- sensitive data remains on Device;
+- low-latency constrained inference can select Edge;
+- capability, cost, latency, network, and privacy constraints are hard
+  filters before placement scoring.
+
+Competition wording:
+
+Under the controlled Cloud-outage workload, fixed Cloud placement
+fails while dynamic routing preserves the failed Cloud attempt and
+successfully falls back to Edge.
+
+Do not describe the current single-machine runtime as measured physical
+network latency between real distributed nodes.
+

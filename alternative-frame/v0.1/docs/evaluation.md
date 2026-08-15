@@ -197,3 +197,62 @@ D evaluation tests currently cover:
 - UI evaluation views.
 
 Live LLM and device/edge/cloud experiments remain pending.
+
+## 9. Fixed Cloud vs Dynamic Device/Edge/Cloud Routing
+
+Status: PASS — deterministic controlled evidence.
+
+The C runtime is integrated through the real:
+
+- `NodeRouter`
+- `TaskRequirements`
+- `RuntimeExecutor`
+- `DeviceNode`
+- `EdgeNode`
+- `CloudNode`
+
+Controlled workload:
+
+A compute task prefers Cloud and an execution-time Cloud outage is
+injected.
+
+### Fixed Cloud
+
+- Cloud is the only execution target.
+- The Cloud attempt fails.
+- No fallback is available.
+- Final completion is false.
+
+### Dynamic Routing
+
+- Cloud is selected first.
+- The failed Cloud attempt is preserved in telemetry.
+- Runtime fallback selects Edge.
+- Edge execution succeeds.
+- Final completion is true.
+- Fallback count is 1.
+
+Observed execution path:
+
+`cloud failure -> edge fallback -> success`
+
+This experiment demonstrates routing resilience and fallback behavior.
+
+It does not claim measured physical distributed-network performance,
+because the current runtime deliberately preserves a remote-compatible
+execution seam while executing on one machine.
+
+The D metrics layer can consume runtime records using:
+
+- `node`
+- `execution_node`
+- `deployment_target`
+
+and aggregate:
+
+- Device task count.
+- Edge task count.
+- Cloud task count.
+- Node failure count.
+- Node duration.
+

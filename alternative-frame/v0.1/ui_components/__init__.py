@@ -6,6 +6,7 @@
     load_competition_evaluation,
     overview_cards,
     recovery_summary,
+    routing_summary,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "load_competition_evaluation",
     "overview_cards",
     "recovery_summary",
+    "routing_summary",
 ]

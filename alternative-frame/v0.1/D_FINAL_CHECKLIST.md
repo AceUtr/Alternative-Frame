@@ -390,7 +390,46 @@ D4 Evaluation UI                        PASS
 D5 Evaluation Documentation             PASS
 D5 Demo Script                          PASS
 
-Device/Edge/Cloud Routing               WAITING FOR C
+Device/Edge/Cloud Routing               PASS
 Live LLM Ablation                       OPTIONAL / DEFERRED
 
 D module core delivery is competition-ready subject to C integration.
+
+
+---
+
+# Final Routing Integration Update
+
+Device / Edge / Cloud Routing: PASS
+
+C runtime integrated successfully.
+
+Validation:
+
+- Full C+D repository: 158 passed.
+- C routing/runtime focused tests: 34 passed.
+- Deterministic routing ablation: 4 passed.
+- D focused suite after routing addition: 48 passed.
+
+Controlled routing result:
+
+Fixed Cloud:
+- completed = false
+- fallback = 0
+- attempts = 1
+
+Dynamic Routing:
+- completed = true
+- final node = Edge
+- fallback = 1
+- attempts = 2
+
+Routing is no longer blocked by C integration.
+
+Current remaining optional work:
+
+- Live LLM recovery ablation.
+- Live LLM Single Agent vs Multi Agent.
+
+Neither is required for the deterministic D1-D5 delivery.
+
