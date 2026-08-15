@@ -1,53 +1,32 @@
-﻿import json
-from pathlib import Path
+﻿from pathlib import Path
 
-from reports.generate_unified_evaluation import latest
+from core.recorded_metrics import metrics_from_recorded_run
+from run_deterministic_contract_ablation import (
+    run_mode as run_contract_mode,
+)
+from run_deterministic_recovery_ablation import (
+    run_mode as run_recovery_mode,
+)
 
 
-def test_required_benchmark_evidence_exists():
-    research = latest(
-        "research_recorded-*.json"
-    )
-    recovery = latest(
-        "deterministic_recovery-*.json"
-    )
-    contract = latest(
-        "deterministic_contract-*.json"
-    )
-
-    assert research.exists()
-    assert recovery.exists()
-    assert contract.exists()
+FIXTURE_ROOT = (
+    Path(__file__).parent
+    / "fixtures"
+    / "research_evaluation"
+)
 
 
 def test_recovery_ablation_has_expected_controlled_result():
-    path = latest(
-        "deterministic_recovery-*.json"
-    )
+    off = run_recovery_mode("recovery_off")
+    on = run_recovery_mode("recovery_on")
 
-    payload = json.loads(
-        path.read_text(encoding="utf-8")
-    )
+    assert off.goal_completed is False
+    assert on.goal_completed is True
 
-    rows = {
-        row["mode"]: row
-        for row in payload["results"]
-    }
+    assert off.local_recovery_count == 0
+    assert on.local_recovery_count == 1
 
-    assert rows["recovery_off"]["goal_completed"] is False
-    assert rows["recovery_on"]["goal_completed"] is True
-
-    assert (
-        rows["recovery_off"]["local_recovery_count"]
-        == 0
-    )
-
-    assert (
-        rows["recovery_on"]["local_recovery_count"]
-        == 1
-    )
-
-    assert rows["recovery_on"]["execution_log"] == [
+    assert on.execution_log == [
         "prepare",
         "compute",
         "compute",
@@ -56,42 +35,57 @@ def test_recovery_ablation_has_expected_controlled_result():
 
 
 def test_contract_ablation_has_single_missing_gate():
-    path = latest(
-        "deterministic_contract-*.json"
-    )
+    off = run_contract_mode("contract_off")
+    on = run_contract_mode("contract_on")
 
-    payload = json.loads(
-        path.read_text(encoding="utf-8")
-    )
+    assert off.completed is True
+    assert on.completed is False
 
-    rows = {
-        row["mode"]: row
-        for row in payload["results"]
-    }
-
-    assert rows["contract_off"]["completed"] is True
-    assert rows["contract_on"]["completed"] is False
-
-    assert rows["contract_on"]["satisfied_criteria"] == [
+    assert on.satisfied_criteria == [
         "source",
         "tests",
     ]
 
-    assert rows["contract_on"]["missing_criteria"] == [
+    assert on.missing_criteria == [
         "final_evidence",
     ]
 
 
 def test_recorded_research_is_not_relabelled_as_controlled():
-    path = latest(
-        "research_recorded-*.json"
+    normal = metrics_from_recorded_run(
+        FIXTURE_ROOT / "normal"
     )
 
-    payload = json.loads(
-        path.read_text(encoding="utf-8")
+    recovery = metrics_from_recorded_run(
+        FIXTURE_ROOT / "local_recovery"
     )
 
     assert (
-        payload["evidence_kind"]
+        normal.metadata["evidence_kind"]
         == "recorded_real_run"
+    )
+
+    assert (
+        recovery.metadata["evidence_kind"]
+        == "recorded_real_run"
+    )
+
+
+def test_recorded_and_controlled_evidence_are_distinct():
+    recorded = metrics_from_recorded_run(
+        FIXTURE_ROOT / "normal"
+    )
+
+    controlled = run_recovery_mode(
+        "recovery_on"
+    )
+
+    assert (
+        recorded.metadata["evidence_kind"]
+        == "recorded_real_run"
+    )
+
+    assert (
+        controlled.evidence_kind
+        == "deterministic_controlled_run"
     )
