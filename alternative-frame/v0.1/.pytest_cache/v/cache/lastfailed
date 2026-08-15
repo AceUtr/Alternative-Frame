@@ -1,4 +1,0 @@
-{
-  "tests/test_global_evaluator.py::test_resume_revokes_historical_false_completion_and_runs_recovery": true,
-  "tests/test_structured_replanner.py::test_structured_replanner_requests_one_correction_after_validation_failure": true
-}

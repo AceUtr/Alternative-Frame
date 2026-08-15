@@ -1,1 +1,0 @@
-{"run_id": "legacy-1", "domain": "research", "mode": "stub", "model": "deterministic", "status": "success", "rounds": 1, "task_count": 1, "success_count": 1, "failed_count": 0, "retry_count": 0, "duration_seconds": 0.1, "model_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "human_interventions": 0, "metadata": {}}
