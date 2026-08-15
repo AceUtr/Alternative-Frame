@@ -39,3 +39,4 @@ export function renderMarkdown(result: AnalysisResult): string {
   else for (const issue of result.validationIssues) lines.push(`- [${issue.severity}] ${issue.code} ${issue.path}: ${issue.message}`);
   return `${lines.join("\n")}\n`;
 }
+

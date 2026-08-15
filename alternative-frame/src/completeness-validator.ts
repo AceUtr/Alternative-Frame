@@ -40,3 +40,4 @@ export function validateCompleteness(result: AnalysisResult): ValidationIssue[] 
 function add(issues: ValidationIssue[], code: string, path: string, message: string): void {
   issues.push({ code, path, severity: "ERROR", message });
 }
+

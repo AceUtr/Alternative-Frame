@@ -9,6 +9,7 @@ import type {
   Requirement,
   SourceInput,
   SourceReference,
+  SuppliedDependency,
 } from "./models.ts";
 
 const vagueTerms = ["适当", "尽快", "及时", "友好", "快速", "良好", "高效", "稳定", "必要时", "合理"];
@@ -154,7 +155,7 @@ function addVagueClarification(terms: string[], requirementIds: string[], source
 
 function suppliedDependencies(command: CreateAnalysisCommand): Dependency[] {
   const supplied = command.dependencies ?? [];
-  const items = Array.isArray(supplied)
+  const items: SuppliedDependency[] = Array.isArray(supplied)
     ? supplied
     : Object.entries(supplied).map(([name, description]) => ({ name, description }));
   return items.filter((item) => item?.name).map((item, index) => ({
@@ -231,3 +232,4 @@ function buildObjective(sources: SourceInput[]): string {
   const titles = sources.map((source) => source.title?.trim()).filter(Boolean);
   return titles.length ? `分析并结构化拆解：${titles.join("、")}` : "将原始业务需求拆解为可追踪、可测试的结构化需求。";
 }
+

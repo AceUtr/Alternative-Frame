@@ -31,3 +31,4 @@ main().catch((error: unknown) => {
   console.error(JSON.stringify(toErrorResponse(error), null, 2));
   process.exitCode = 1;
 });
+

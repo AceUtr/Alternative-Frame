@@ -39,4 +39,3 @@ class ShellRunner(Tool):
             return ToolResult(self.name, p.returncode == 0, output=output, exit_code=p.returncode, duration_seconds=round(time.perf_counter() - started, 3))
         except subprocess.TimeoutExpired as exc:
             return ToolResult(self.name, False, error=f"timeout after {self.timeout_seconds}s", output=str(exc), duration_seconds=round(time.perf_counter() - started, 3))
-

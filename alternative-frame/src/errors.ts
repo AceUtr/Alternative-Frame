@@ -55,3 +55,4 @@ export function toErrorResponse(error: unknown): ErrorResponse {
     },
   };
 }
+

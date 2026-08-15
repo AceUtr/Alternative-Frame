@@ -75,3 +75,4 @@ export function validateInput(command: CreateAnalysisCommand): ValidationIssue[]
 function issue(code: string, path: string, message: string): ValidationIssue {
   return { code, path, severity: "ERROR", message };
 }
+

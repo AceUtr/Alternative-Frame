@@ -51,13 +51,14 @@ export type AuthErrorCode =
   | "TOKEN_EXPIRED";
 
 export class AuthError extends Error {
-  constructor(
-    public readonly code: AuthErrorCode,
-    message: string,
-    public readonly status: 400 | 401 | 409,
-  ) {
+  readonly code: AuthErrorCode;
+  readonly status: 400 | 401 | 409;
+
+  constructor(code: AuthErrorCode, message: string, status: 400 | 401 | 409) {
     super(message);
     this.name = "AuthError";
+    this.code = code;
+    this.status = status;
   }
 }
 
@@ -92,11 +93,10 @@ export class AuthService {
   readonly #minimumPasswordLength: number;
   readonly #now: () => Date;
   readonly #secret: string;
+  readonly users: UserRepository;
 
-  constructor(
-    private readonly users: UserRepository,
-    options: AuthServiceOptions,
-  ) {
+  constructor(users: UserRepository, options: AuthServiceOptions) {
+    this.users = users;
     if (typeof options.tokenSecret !== "string" || Buffer.byteLength(options.tokenSecret) < 32) {
       throw new Error("tokenSecret 必须至少为 32 字节");
     }
@@ -234,3 +234,4 @@ function signature(content: string, secret: string): string {
 function publicUser(user: StoredUser): User {
   return { id: user.id, email: user.email, createdAt: user.createdAt };
 }
+

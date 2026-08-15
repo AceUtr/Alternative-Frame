@@ -29,6 +29,7 @@ __pycache__/
 alternative-frame/v0.1/requirements.md
 alternative-frame/v0.1/architecture.md
 alternative-frame/v0.1/retry_demo/
+alternative-frame/v0.1/.validation_tmp/
 alternative-frame/v0.1/src/
 alternative-frame/v0.1/tests/test_auth_service.py
 alternative-frame/v0.1/tests/test_requirements_acceptance.py

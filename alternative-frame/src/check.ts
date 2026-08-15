@@ -9,3 +9,4 @@ assert.equal(result.requirements.length, 2);
 assert.ok(result.requirements.every((requirement) => result.acceptanceCriteria.some((item) => item.requirementId === requirement.id)));
 assert.match(renderMarkdown(result), /无已知依赖/);
 console.log("local check passed");
+
