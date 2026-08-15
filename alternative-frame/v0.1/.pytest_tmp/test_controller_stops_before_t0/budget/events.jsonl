@@ -1,0 +1,2 @@
+{"time": "2026-08-14T06:01:54.461889+00:00", "event": "run_started", "payload": {"resume": false}}
+{"time": "2026-08-14T06:01:54.467912+00:00", "event": "budget_exhausted", "payload": {"reason": "max_total_tasks_exceeded"}}
