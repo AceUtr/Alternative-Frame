@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict
@@ -27,7 +28,13 @@ class ShellRunner(Tool):
             return ToolResult(self.name, False, error="blocked dangerous command")
         started = time.perf_counter()
         try:
-            p = subprocess.run(command, cwd=self.workspace, shell=True, capture_output=True, text=True, timeout=self.timeout_seconds)
+            # Keep the declared command in evidence, but avoid Windows Store's
+            # python.exe alias when executing repository tasks.
+            executable_command = command
+            if sys.platform == "win32" and command.strip().lower().startswith("python "):
+                actual_python = subprocess.list2cmdline([sys.executable])
+                executable_command = actual_python + command.strip()[6:]
+            p = subprocess.run(executable_command, cwd=self.workspace, shell=True, capture_output=True, text=True, timeout=self.timeout_seconds)
             output = (p.stdout + ("\n" + p.stderr if p.stderr else ""))[: self.max_output]
             return ToolResult(self.name, p.returncode == 0, output=output, exit_code=p.returncode, duration_seconds=round(time.perf_counter() - started, 3))
         except subprocess.TimeoutExpired as exc:
