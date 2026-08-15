@@ -1,281 +1,94 @@
-﻿# Evaluation Methodology
+# Evaluation Methodology
 
 ## 1. Purpose
+The evaluation layer measures execution reliability, recovery behavior, contract correctness, orchestration efficiency, and routing resilience.
 
-The evaluation layer measures whether Alternative-Frame improves
-execution reliability, recovery behavior, contract correctness,
-and orchestration efficiency.
-
-Evaluation evidence is deliberately separated by evidence class.
-Results from different evidence classes must not be silently mixed.
+Evidence classes are kept separate and must not be silently mixed.
 
 ## 2. Evidence Classes
 
 ### deterministic_controlled_run
-
-A controlled experiment with deterministic task behavior.
-
 Used for:
+- Single Agent vs Multi Agent
+- Recovery OFF vs ON
+- Contract validation OFF vs ON
+- Fixed Cloud vs Dynamic Routing
 
-- Single Agent vs Multi Agent orchestration topology.
-- Recovery OFF vs local recovery ON.
-- Contract validation OFF vs ON.
-
-These runs are suitable for mechanism-level claims because the
-input, task behavior, and injected failures are controlled.
-
-They are not evidence of superior LLM reasoning quality.
+Suitable for mechanism-level claims, not superior LLM reasoning quality or physical network-performance claims.
 
 ### recorded_real_run
-
-Historical runs produced by the actual research-demo execution
-pipeline.
-
-These runs demonstrate that project mechanisms such as local
-recovery and multi-phase contract completion have occurred in
-real project execution.
-
-They are observational evidence and must not be presented as
-controlled treatment-vs-control experiments.
+Historical real project runs. They show that mechanisms such as local recovery and multi-phase completion occurred in genuine executions, but are not controlled treatment-vs-control experiments.
 
 ### live_real_run
-
-Live model-driven benchmark runs.
-
-These require an API model and will be added separately.
-
-No live-model claim should be made until those experiments have
-actually been executed.
+Reserved for future API model experiments. No live-model claim is made before running them.
 
 ## 3. Core Metrics
-
-The evaluation schema records:
-
-- Final goal completion.
-- Task count.
-- Successful tasks.
-- Failed tasks.
-- First-pass success count.
-- Retry count.
-- Local recovery count.
-- Phase count.
-- Additional phase count.
-- Wall-clock duration.
-- Model-call count.
-- Prompt tokens.
-- Completion tokens.
-- Total tokens.
-- Estimated cost.
-- Tool-call count.
-- Successful tool calls.
-- Human interventions.
-- Device task count.
-- Edge task count.
-- Cloud task count.
-- Unknown-node task count.
-- Per-node failure counts.
-- Per-node duration.
+Final completion, task counts, first-pass success, retries, local recovery, phases, wall-clock duration, model calls, tokens, estimated cost, tool success, human interventions, device/edge/cloud/unknown counts, per-node failures, and per-node duration.
 
 ## 4. Unknown Values
-
-Missing observations must not be converted into numeric zero.
-
-For example:
-
-- no token telemetry -> token count is unknown;
-- no model pricing -> estimated cost is unknown;
-- no routing evidence -> node placement is unknown.
-
-Zero means a value was observed and measured as zero.
-
-Unknown means the value was not available.
+Missing observations remain unknown, never coerced to zero.
 
 ## 5. Controlled Experiments
 
 ### 5.1 Single Agent vs Multi Agent
+- completion: 100% / 100%
+- mean duration: 0.4041 s / 0.3247 s
+- wall-clock speedup: 1.245x
+- multi-agent mean parallel overlap: 0.0802 s
 
-Current deterministic evidence compares:
-
-- one serialized universal backend;
-- multiple role-specific backends.
-
-Both conditions use the same DAG, task implementation,
-success criteria, Orchestrator, and parallel scheduling policy.
-
-Current evidence establishes orchestration parallelism benefit,
-not superior language-model reasoning quality.
+Conclusion: orchestration parallelism benefit under controlled deterministic task logic.
 
 ### 5.2 Recovery OFF vs Recovery ON
+DAG: `prepare -> compute -> verify`
 
-A deterministic failure is injected into the `compute` node of:
+- OFF: failed; trace `prepare, compute`
+- ON: completed; one local recovery; trace `prepare, compute, compute, verify`
 
-`prepare -> compute -> verify`
-
-With recovery disabled, the workflow remains failed.
-
-With local recovery enabled:
-
-- the failed node is identified;
-- the blocked downstream node is identified;
-- the successful predecessor is frozen;
-- only the impacted subgraph is rerun.
-
-The experiment therefore measures both recoverability and
-recovery locality.
+The successful predecessor is frozen and not rerun.
 
 ### 5.3 Contract Validation OFF vs ON
+Same successful phase report; `FINAL_EVIDENCE.md` deliberately missing.
 
-Both conditions receive the same successful phase report.
+- OFF: completed = true
+- ON: completed = false; missing `final_evidence`
 
-The workspace contains:
+Conclusion: global contract validation prevents false completion.
 
-- `calculator.py`;
-- provenance for `calculator.py`;
-- exact successful test-command evidence.
-
-`FINAL_EVIDENCE.md` is deliberately missing.
-
-Without the contract gate, the successful phase is declared
-complete.
-
-With the contract gate, completion is rejected because the
-`final_evidence` criterion is missing.
-
-This demonstrates prevention of false completion.
-
-### 5.4 Fixed vs Dynamic Device/Edge/Cloud Routing
-
+### 5.4 Fixed Cloud vs Dynamic Device/Edge/Cloud Routing
 Status: PASS — deterministic controlled evidence.
 
-A compute task prefers Cloud while an execution-time Cloud outage is injected.
+Integrated runtime: `NodeRouter`, `TaskRequirements`, `RuntimeExecutor`, `DeviceNode`, `EdgeNode`, `CloudNode`.
 
-Fixed Cloud:
+- Fixed Cloud: failed, no fallback.
+- Dynamic Routing: Cloud selected first, failed attempt preserved, Edge fallback succeeds, fallback count = 1.
 
-- Cloud is the only execution target.
-- The Cloud attempt fails.
-- No fallback is available.
-- Final completion is false.
+Observed path: `cloud failure -> edge fallback -> success`
 
-Dynamic Routing:
+This demonstrates routing resilience, not measured physical distributed-network performance.
 
-- Cloud is selected first.
-- The failed Cloud attempt remains visible in telemetry.
-- Runtime fallback selects Edge.
-- Edge execution succeeds.
-- Final completion is true.
-- Fallback count is 1.
-
-Observed path:
-
-`cloud failure -> edge fallback -> success`
-
-This demonstrates routing resilience and fallback behavior through the real
-NodeRouter / RuntimeExecutor path.
-
-It does not establish physical distributed-network performance.
 ## 6. Recorded Research Evidence
+Two recorded real research runs show final-goal completion, multi-phase execution, contract completion, and one real local-recovery event.
 
-Two real recorded research runs are currently available.
-
-They demonstrate:
-
-- final goal completion;
-- multi-phase execution;
-- contract completion after additional work;
-- a real local-recovery event in the recovery sample.
-
-The recovery sample contains cumulative planning work introduced
-by recovery.
-
-Therefore `8 / 11` must not be interpreted as a 72.7% final-goal
-completion rate.
+Do not interpret `8 / 11` as a 72.7% final-goal completion rate; the denominator includes recovery-added planning work.
 
 ## 7. Reproducibility
-
-Benchmark outputs are stored separately from benchmark source code.
-
-Generated run outputs must not overwrite previous raw evidence.
-
-Each benchmark run should use:
-
-- a unique run ID;
-- an isolated workspace;
-- append-only raw results;
-- separately generated summaries.
+Use unique run IDs, isolated workspaces, append-only raw outputs, separate summaries, and tests that do not depend on ignored artifacts from previous local runs.
 
 ## 8. Current Validation Status
+- D focused suite: 49 passed
+- Full C+D repository: 163 passed, 0 failed
+- C routing/runtime focused suite: 34 passed
+- Deterministic routing ablation: 4 passed
 
-D evaluation tests currently cover:
+Device/edge/cloud routing evaluation is complete. Live LLM experiments remain optional and deferred.
 
-- metric extraction;
-- real recorded samples;
-- benchmark execution;
-- evaluation reports;
-- recovery modes;
-- deterministic recovery ablation;
-- deterministic contract ablation;
-- unified evaluation;
-- deterministic agent-topology ablation;
-- UI evaluation views.
+## 9. Routing Telemetry Integration
+The metrics layer consumes `node`, `execution_node`, and `deployment_target`, aggregating device/edge/cloud/unknown task counts, node failures, and node duration.
 
-Device/edge/cloud routing evaluation is complete. Live LLM experiments remain optional and pending.
-
-## 9. Fixed Cloud vs Dynamic Device/Edge/Cloud Routing
-
-Status: PASS — deterministic controlled evidence.
-
-The C runtime is integrated through the real:
-
-- `NodeRouter`
-- `TaskRequirements`
-- `RuntimeExecutor`
-- `DeviceNode`
-- `EdgeNode`
-- `CloudNode`
-
-Controlled workload:
-
-A compute task prefers Cloud and an execution-time Cloud outage is
-injected.
-
-### Fixed Cloud
-
-- Cloud is the only execution target.
-- The Cloud attempt fails.
-- No fallback is available.
-- Final completion is false.
-
-### Dynamic Routing
-
-- Cloud is selected first.
-- The failed Cloud attempt is preserved in telemetry.
-- Runtime fallback selects Edge.
-- Edge execution succeeds.
-- Final completion is true.
-- Fallback count is 1.
-
-Observed execution path:
-
-`cloud failure -> edge fallback -> success`
-
-This experiment demonstrates routing resilience and fallback behavior.
-
-It does not claim measured physical distributed-network performance,
-because the current runtime deliberately preserves a remote-compatible
-execution seam while executing on one machine.
-
-The D metrics layer can consume runtime records using:
-
-- `node`
-- `execution_node`
-- `deployment_target`
-
-and aggregate:
-
-- Device task count.
-- Edge task count.
-- Cloud task count.
-- Node failure count.
-- Node duration.
-
-
+## 10. Evidence Boundaries
+Do not:
+- present deterministic timing as proof of superior LLM intelligence;
+- present historical runs as controlled experiments;
+- convert unknown telemetry to zero;
+- describe single-machine routing as measured physical network performance;
+- present smoke/stub values as competition performance.
