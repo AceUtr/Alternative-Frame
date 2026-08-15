@@ -9,6 +9,7 @@ from core.long_horizon import (
     AcceptanceContract,
     EvidenceBundle,
     GoalCriterion,
+    GoalEvaluation,
     HardEvidenceGate,
     LongHorizonController,
     LongHorizonState,

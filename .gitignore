@@ -1,4 +1,4 @@
-# Local tooling and caches
+﻿# Local tooling and caches
 .agents/
 .pytest_cache/
 .pytest_tmp/
@@ -45,5 +45,9 @@ alternative-frame/v0.1/reports/real_evaluation/
 alternative-frame/v0.1/reports/unified_evaluation/
 alternative-frame/v0.1/reports/unified_evaluation_v2/
 
-# Recovery ablation runtime workspaces
+# D recovery ablation runtime workspaces
 alternative-frame/v0.1/runs/recovery_ablation/
+
+# C edge-cloud runtime workspaces
+alternative-frame/v0.1/runs/edge_cloud_long_horizon/*
+alternative-frame/v0.1/runs/edge_cloud_replan/*
