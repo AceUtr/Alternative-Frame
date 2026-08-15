@@ -35,10 +35,10 @@ Implemented:
 Important semantics:
 
 - Missing telemetry is UNKNOWN, not zero.
-- Missing node assignment is UNKNOWN, not device/edge/cloud.
+- Missing node assignment is UNKNOWN.
 - Missing model usage is UNKNOWN, not zero cost.
 
-Real recorded research samples are included as regression fixtures.
+Recorded research samples are included as regression fixtures.
 
 ---
 
@@ -75,31 +75,30 @@ Evidence classes:
 
 ---
 
-# D3 — Evaluation Experiments
+# D3 — Controlled Evaluation Experiments
 
 ## Single Agent vs Multi Agent
 
 Status: PASS — deterministic controlled evidence
 
-Observed controlled result:
+Final controlled result:
 
-- Single Agent completion rate: 1.00
-- Multi Agent completion rate: 1.00
-- Single Agent mean duration: approximately 0.4048 s
-- Multi Agent mean duration: approximately 0.3244 s
-- Wall-clock speedup: approximately 1.248x
-- Single Agent parallel overlap: approximately 0
-- Multi Agent parallel overlap: approximately 0.0803 s
+- Single Agent completion: 100%
+- Multi Agent completion: 100%
+- Single Agent mean duration: 0.4041 s
+- Multi Agent mean duration: 0.3247 s
+- Multi Agent wall-clock speedup: 1.245x
+- Multi Agent mean parallel overlap: 0.0802 s
 
-Valid claim:
+Supported claim:
 
-Multi-agent role topology exposes DAG parallelism and reduces wall-clock
-time in the deterministic controlled workload.
+Multi-agent role topology exposes available DAG parallelism and reduces
+wall-clock duration in the controlled workload.
 
-Invalid claim:
+Not supported:
 
-Do NOT claim that deterministic multi-agent execution proves superior
-LLM reasoning quality.
+This deterministic experiment does NOT establish superior LLM reasoning
+quality.
 
 ---
 
@@ -111,32 +110,26 @@ Controlled DAG:
 
 prepare -> compute -> verify
 
-Injected behavior:
-
-compute fails on its first execution.
-
 Recovery OFF:
 
-- Final status: failed.
-- Local recovery count: 0.
-- Execution trace:
-  prepare, compute
+- completed = false
+- local recovery cycles = 0
+- execution trace = prepare, compute
 
 Recovery ON:
 
-- Final status: success.
-- Local recovery count: 1.
-- Execution trace:
-  prepare, compute, compute, verify
+- completed = true
+- local recovery cycles = 1
+- execution trace = prepare, compute, compute, verify
 
 Important result:
 
-The successful prepare node is frozen and NOT rerun.
+The successful `prepare` predecessor is frozen and is not rerun.
 
-Valid claim:
+Supported claim:
 
-Local DAG recovery can repair an impacted subgraph without rerunning
-an unaffected successful predecessor.
+Local DAG recovery repairs the impacted subgraph while preserving
+unaffected successful work.
 
 ---
 
@@ -144,32 +137,80 @@ an unaffected successful predecessor.
 
 Status: PASS — deterministic controlled evidence
 
-Controlled condition:
+Both conditions receive the same successful phase report.
 
-Both modes receive the same successful phase report.
-
-Verified before evaluation:
+Verified evidence before evaluation:
 
 - calculator.py exists.
-- calculator.py has run provenance.
+- calculator.py has provenance.
 - required test command has successful exit-code-0 evidence.
 - FINAL_EVIDENCE.md is deliberately absent.
 
 Contract OFF:
 
-- phase_status = success
+- phase status = success
 - completed = true
 
 Contract ON:
 
-- phase_status = success
+- phase status = success
 - completed = false
-- missing = final_evidence
+- missing criterion = final_evidence
 
-Valid claim:
+Supported claim:
 
-Global contract validation prevents false completion when individual
-phase tasks report success but the final required evidence is missing.
+Global contract validation prevents false completion when required final
+evidence is missing.
+
+---
+
+## Fixed Cloud vs Dynamic Device/Edge/Cloud Routing
+
+Status: PASS — deterministic controlled evidence
+
+C runtime integration is complete.
+
+Integrated runtime components include:
+
+- NodeRouter
+- TaskRequirements
+- RuntimeExecutor
+- DeviceNode
+- EdgeNode
+- CloudNode
+
+Controlled workload:
+
+A compute task prefers Cloud and an execution-time Cloud outage is injected.
+
+Fixed Cloud:
+
+- completed = false
+- final node = cloud
+- fallback count = 0
+- execution attempts = 1
+
+Dynamic Routing:
+
+- completed = true
+- final node = edge
+- fallback count = 1
+- execution attempts = 2
+
+Observed path:
+
+cloud failure -> edge fallback -> success
+
+Supported claim:
+
+Under the controlled Cloud-outage condition, fixed Cloud placement fails,
+while the real routing/runtime path preserves the failed Cloud attempt and
+successfully falls back to Edge.
+
+Boundary:
+
+This is a deterministic single-machine routing-resilience experiment.
+It is not a measurement of physical distributed-network performance.
 
 ---
 
@@ -191,45 +232,11 @@ Recorded behavior includes:
 
 Important warning:
 
-8 completed tasks / 11 cumulative planned tasks must NOT be described
-as a 72.7% final-goal success rate.
+8 completed tasks / 11 cumulative planned tasks must NOT be described as
+a 72.7% final-goal success rate.
 
-Recovery introduced additional planned work while the final goal still
-completed.
-
----
-
-## Fixed Node vs Dynamic Device/Edge/Cloud Routing
-
-Status: BLOCKED BY C INTEGRATION
-
-D-side metrics support is READY.
-
-Recognized node fields:
-
-- node
-- execution_node
-- deployment_target
-
-Supported values:
-
-- device
-- edge
-- cloud
-- unknown
-
-Waiting for C implementation:
-
-- actual routing policy;
-- device/edge/cloud runtime nodes;
-- dynamic placement decisions;
-- fixed-routing baseline;
-- routing execution evidence.
-
-Current repository only contains the C requirement and validation
-manifest, not the required runtime/routing implementation.
-
-Do NOT make routing-performance claims yet.
+The final goal completed; the denominator includes recovery-introduced
+planning work.
 
 ---
 
@@ -237,25 +244,22 @@ Do NOT make routing-performance claims yet.
 
 Status: PASS
 
-Implemented read-only evaluation UI components.
-
-Primary module:
-
-ui_components/metrics_views.py
-
-Available views/helpers include:
+Implemented:
 
 - competition evaluation loader;
 - agent comparison summary;
 - recovery summary;
 - contract summary;
+- routing summary;
 - overview cards;
 - text overview;
 - optional Tkinter evaluation panel.
 
-D components do not modify benchmark execution state.
+Primary module:
 
-Main UI integration can be performed independently.
+ui_components/metrics_views.py
+
+The UI layer is read-only and does not mutate benchmark execution state.
 
 ---
 
@@ -267,10 +271,11 @@ Implemented:
 
 - docs/evaluation.md
 - docs/demo-script.md
-- unified evaluation reports
+- final competition report generator
 - competition comparison CSV generation
 - evaluation JSON generation
 - competition figures
+- final delivery checklist
 
 Demo target:
 
@@ -285,9 +290,47 @@ Demo covers:
 5. Recorded real research evidence.
 6. Evaluation dashboard.
 7. Token/cost semantics.
-8. Device/edge/cloud section when C is ready.
-9. Final evidence-backed conclusions.
+8. Fixed Cloud vs Dynamic Routing.
+9. Evidence-backed conclusions.
 10. Failure fallback.
+
+---
+
+# Test Status
+
+D evaluation-focused suite:
+
+49 passed
+
+Full C+D repository:
+
+163 passed
+0 failed
+
+Additional routing validation previously confirmed:
+
+- C routing/runtime focused tests: 34 passed.
+- Deterministic routing ablation: 4 passed.
+
+---
+
+# Evidence Discipline
+
+Competition claims MUST match evidence strength.
+
+Allowed:
+
+- Deterministic controlled experiments support isolated mechanism-level claims.
+- Recorded real runs support claims that behavior occurred in genuine project execution.
+- Live runs support live-model claims only after live experiments are actually executed.
+
+Not allowed:
+
+- Present deterministic timing as proof of superior LLM intelligence.
+- Present recorded historical runs as controlled treatment-vs-control experiments.
+- Turn UNKNOWN telemetry into zero.
+- Describe the current single-machine routing runtime as measured physical network performance.
+- Present smoke/stub values as competition performance.
 
 ---
 
@@ -295,7 +338,7 @@ Demo covers:
 
 Status: OPTIONAL / DEFERRED
 
-API access is available but live experiments are intentionally deferred.
+API access exists, but live experiments are intentionally deferred.
 
 Prepared experiment:
 
@@ -307,129 +350,32 @@ Modes:
 - phase
 - full
 
-Once live experiments are executed, results must be labeled:
+Future live results must be labelled:
 
 live_real_run
 
-Never silently combine live, recorded, and deterministic results.
+Never silently combine live, recorded, and deterministic evidence.
 
 ---
 
-# Test Status
-
-D evaluation-focused tests:
-
-44 passed
-
-Latest full repository test result:
-
-122 passed
-2 failed
-
-The two failures were pre-existing integration/test issues:
-
-1. test_global_evaluator.py
-
-   GoalEvaluation is referenced without being imported.
-
-2. test_structured_replanner.py
-
-   Test expectation does not include the current
-   replan_retry_wait event emitted by implementation.
-
-No new D regression was identified.
-
----
-
-# Evidence Discipline
-
-Competition claims MUST match evidence strength.
-
-Allowed:
-
-- Deterministic controlled experiments prove isolated mechanism behavior.
-- Recorded real runs prove that behavior occurred in real project runs.
-- Live runs prove live model execution behavior only after they are run.
-
-Not allowed:
-
-- Present deterministic timing as proof of superior LLM intelligence.
-- Present historical runs as controlled experiments.
-- Turn UNKNOWN telemetry into zero.
-- Claim device/edge/cloud improvement before C routing exists.
-- Present smoke/stub values as competition performance.
-
----
-
-# Final Remaining Work
-
-Required:
-
-- Integrate C routing when implementation becomes available.
-- Run fixed-node vs dynamic-routing benchmark.
-
-Recommended:
-
-- Run live LLM recovery ablation when budget allows.
-- Run live Single Agent vs Multi Agent experiment when budget allows.
-- Re-run full repository tests after merging latest team changes.
-- Regenerate final unified evaluation report after all integrations.
-
----
-
-# Current Delivery State
+# Final Delivery State
 
 D1 Metrics                              PASS
 D2 Benchmark Runner                     PASS
 D3 Single vs Multi                      PASS
 D3 Recovery Ablation                    PASS
 D3 Contract Ablation                    PASS
+D3 Fixed vs Dynamic Routing             PASS
 D3 Recorded Real Evidence               PASS
-D3 Unified Reporting                    PASS
+D3 Final Competition Report             PASS
 D4 Evaluation UI                        PASS
 D5 Evaluation Documentation             PASS
 D5 Demo Script                          PASS
 
-Device/Edge/Cloud Routing               PASS
+D focused tests                         49 passed
+Full repository                         163 passed
+Failures                                0
+
 Live LLM Ablation                       OPTIONAL / DEFERRED
 
-D module core delivery is competition-ready subject to C integration.
-
-
----
-
-# Final Routing Integration Update
-
-Device / Edge / Cloud Routing: PASS
-
-C runtime integrated successfully.
-
-Validation:
-
-- Full C+D repository: 158 passed.
-- C routing/runtime focused tests: 34 passed.
-- Deterministic routing ablation: 4 passed.
-- D focused suite after routing addition: 48 passed.
-
-Controlled routing result:
-
-Fixed Cloud:
-- completed = false
-- fallback = 0
-- attempts = 1
-
-Dynamic Routing:
-- completed = true
-- final node = Edge
-- fallback = 1
-- attempts = 2
-
-Routing is no longer blocked by C integration.
-
-Current remaining optional work:
-
-- Live LLM recovery ablation.
-- Live LLM Single Agent vs Multi Agent.
-
-Neither is required for the deterministic D1-D5 delivery.
-
+D1-D5 core delivery is complete.

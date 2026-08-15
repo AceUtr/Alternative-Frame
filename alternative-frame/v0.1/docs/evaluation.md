@@ -145,12 +145,34 @@ This demonstrates prevention of false completion.
 
 ### 5.4 Fixed vs Dynamic Device/Edge/Cloud Routing
 
-Pending integration with the routing interface owned by the
-routing module.
+Status: PASS — deterministic controlled evidence.
 
-No routing-performance claim should be made until the routing
-policy and node-placement evidence are available.
+A compute task prefers Cloud while an execution-time Cloud outage is injected.
 
+Fixed Cloud:
+
+- Cloud is the only execution target.
+- The Cloud attempt fails.
+- No fallback is available.
+- Final completion is false.
+
+Dynamic Routing:
+
+- Cloud is selected first.
+- The failed Cloud attempt remains visible in telemetry.
+- Runtime fallback selects Edge.
+- Edge execution succeeds.
+- Final completion is true.
+- Fallback count is 1.
+
+Observed path:
+
+`cloud failure -> edge fallback -> success`
+
+This demonstrates routing resilience and fallback behavior through the real
+NodeRouter / RuntimeExecutor path.
+
+It does not establish physical distributed-network performance.
 ## 6. Recorded Research Evidence
 
 Two real recorded research runs are currently available.
@@ -196,7 +218,7 @@ D evaluation tests currently cover:
 - deterministic agent-topology ablation;
 - UI evaluation views.
 
-Live LLM and device/edge/cloud experiments remain pending.
+Device/edge/cloud routing evaluation is complete. Live LLM experiments remain optional and pending.
 
 ## 9. Fixed Cloud vs Dynamic Device/Edge/Cloud Routing
 
@@ -255,4 +277,5 @@ and aggregate:
 - Cloud task count.
 - Node failure count.
 - Node duration.
+
 

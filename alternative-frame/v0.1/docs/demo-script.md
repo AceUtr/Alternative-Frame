@@ -173,24 +173,47 @@ If telemetry is absent, display `unknown`, never fake `0`.
 
 If live API experiments have not been run, say so explicitly.
 
-## 9:15–10:00 — Device / Edge / Cloud
+## 9:15–10:00 — Device / Edge / Cloud Routing
 
-If the routing module is ready:
+Show the controlled Fixed Cloud vs Dynamic Routing experiment.
 
-show fixed placement vs dynamic routing.
+Fixed Cloud:
 
-Show:
+- completed = false
+- final node = cloud
+- fallback = 0
+- attempts = 1
 
-- per-node task counts;
-- per-node failures;
-- per-node duration;
-- cost / latency comparison if available.
+Dynamic Routing:
 
-If the routing module is not ready:
+- completed = true
+- final node = edge
+- fallback = 1
+- attempts = 2
 
-state that routing evaluation is reserved in the schema but no
-routing-performance claim is currently made.
+Show the execution trace:
 
+`Cloud attempt -> injected failure -> Edge fallback -> success`
+
+Explain:
+
+The fixed policy has no alternate execution target, so the injected Cloud
+failure becomes final.
+
+The dynamic policy preserves the failed Cloud attempt in telemetry and falls
+back to Edge successfully.
+
+Also mention:
+
+- sensitive data remains on Device;
+- low-latency constrained inference can select Edge;
+- capability, cost, latency, network, and privacy constraints are hard filters
+  before placement scoring.
+
+Important wording:
+
+This is controlled routing-resilience evidence using the real runtime.
+Do not describe it as measured physical latency between real distributed nodes.
 ## 10:00–10:45 — Final Summary
 
 Summarize only evidence-backed conclusions:
@@ -201,8 +224,7 @@ Summarize only evidence-backed conclusions:
 3. Contract validation prevents false completion.
 4. Recovery and multi-phase completion have occurred in real
    recorded research runs.
-5. Live LLM and routing conclusions are reported only after the
-   corresponding evidence exists.
+5. Routing conclusions are backed by deterministic controlled evidence; live LLM claims remain deferred.
 
 ## Failure Fallback
 
@@ -270,4 +292,5 @@ successfully falls back to Edge.
 
 Do not describe the current single-machine runtime as measured physical
 network latency between real distributed nodes.
+
 
