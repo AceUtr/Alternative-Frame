@@ -143,3 +143,112 @@ def test_directory_output_accepts_a_run_provenanced_child_file(tmp_path):
     report = AcceptanceEvaluator(tmp_path).evaluate(task, result)
 
     assert report.passed is True
+
+
+def test_command_acceptance_accepts_experiment_runner_evidence(tmp_path):
+    result = AgentResult(
+        "tests",
+        "success",
+        tool_records=[
+            {
+                "tool": "experiment_runner",
+                "arguments": {"command": "python -m unittest -v"},
+                "success": True,
+                "exit_code": 0,
+            }
+        ],
+    )
+
+    report = AcceptanceEvaluator(tmp_path).evaluate(command_task(), result)
+
+    assert report.passed is True
+
+
+def metric_task(threshold=0.8, mode="max"):
+    return SubTask(
+        "experiment",
+        "researcher",
+        "run experiment",
+        metadata={
+            "checks": [
+                {
+                    "id": "accuracy_gate",
+                    "check_type": "metric",
+                    "metric_name": "accuracy",
+                    "threshold": threshold,
+                    "mode": mode,
+                }
+            ]
+        },
+    )
+
+
+def test_metric_acceptance_rejects_prose_without_tool_metric(tmp_path):
+    result = AgentResult(
+        "experiment",
+        "success",
+        summary="baseline experiment metric passed with excellent accuracy",
+    )
+
+    report = AcceptanceEvaluator(tmp_path).evaluate(metric_task(), result)
+
+    assert report.passed is False
+    assert "metric_evidence_missing" in report.failures[0]
+
+
+def test_metric_acceptance_rejects_value_below_threshold(tmp_path):
+    result = AgentResult(
+        "experiment",
+        "success",
+        tool_records=[
+            {
+                "tool": "experiment_runner",
+                "success": True,
+                "metadata": {"metrics": {"accuracy": 0.79}},
+            }
+        ],
+    )
+
+    report = AcceptanceEvaluator(tmp_path).evaluate(metric_task(), result)
+
+    assert report.passed is False
+    assert "accuracy=0.79 >= 0.8" in report.failures[0]
+
+
+def test_metric_acceptance_passes_successful_tool_value_at_threshold(tmp_path):
+    result = AgentResult(
+        "experiment",
+        "success",
+        tool_records=[
+            {
+                "tool": "experiment_runner",
+                "success": True,
+                "metadata": {"metrics": {"accuracy": 0.8}},
+            }
+        ],
+    )
+
+    report = AcceptanceEvaluator(tmp_path).evaluate(metric_task(), result)
+
+    assert report.passed is True
+    assert "accuracy=0.8 >= 0.8" in report.checks[0]
+
+
+def test_metric_acceptance_supports_lower_is_better(tmp_path):
+    result = AgentResult(
+        "experiment",
+        "success",
+        tool_records=[
+            {
+                "tool": "experiment_runner",
+                "success": True,
+                "metadata": {"metrics": {"accuracy": 0.2}},
+            }
+        ],
+    )
+
+    report = AcceptanceEvaluator(tmp_path).evaluate(
+        metric_task(threshold=0.25, mode="min"), result
+    )
+
+    assert report.passed is True

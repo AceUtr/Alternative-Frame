@@ -1,0 +1,25 @@
+{
+  "experiment": "nearest_centroid_v1",
+  "dataset_version": "synthetic-centroids-v2",
+  "seed": 1729,
+  "train_rows": 160,
+  "test_rows": 40,
+  "metric_name": "accuracy",
+  "accuracy": 0.8,
+  "correct": 32,
+  "features_used": [
+    "x1"
+  ],
+  "centroids": {
+    "0": [
+      -0.85928248
+    ],
+    "1": [
+      0.97319885
+    ]
+  },
+  "dependencies": {
+    "python": ">=3.10",
+    "third_party": []
+  }
+}

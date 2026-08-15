@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -38,7 +39,7 @@ class AcceptanceEvaluator:
                 matching_records = [
                     record
                     for record in result.tool_records
-                    if record.get("tool") in ("test_runner", "shell_runner")
+                    if record.get("tool") in ("test_runner", "shell_runner", "experiment_runner")
                     and self._normalize_command(record.get("arguments", {}).get("command")) == expected
                     and record.get("success") is True
                     and record.get("exit_code") == 0
@@ -71,10 +72,35 @@ class AcceptanceEvaluator:
                     else:
                         passed.append(f"{check_id}: artifacts_exist_with_run_provenance")
             elif check_type == "metric":
-                if any(token in content for token in ("metric", "指标", "experiment", "实验", "baseline", "基线")):
-                    passed.append(f"{check_id}: evidence_present")
+                metric_name = check.get("metric_name")
+                threshold = check.get("threshold")
+                mode = str(check.get("mode", "max")).lower()
+                values = []
+                for record in result.tool_records:
+                    if record.get("success") is not True:
+                        continue
+                    value = record.get("metadata", {}).get("metrics", {}).get(metric_name)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        numeric = float(value)
+                        if math.isfinite(numeric):
+                            values.append(numeric)
+                if not isinstance(metric_name, str) or not metric_name.strip():
+                    failures.append(f"{check_id}: metric_name_missing")
+                elif not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
+                    failures.append(f"{check_id}: metric_threshold_invalid")
+                elif mode not in {"max", "min"}:
+                    failures.append(f"{check_id}: metric_mode_invalid ({mode})")
+                elif not values:
+                    failures.append(f"{check_id}: metric_evidence_missing ({metric_name})")
                 else:
-                    failures.append(f"{check_id}: metric_evidence_missing")
+                    actual = max(values) if mode == "max" else min(values)
+                    ok = actual >= float(threshold) if mode == "max" else actual <= float(threshold)
+                    operator = ">=" if mode == "max" else "<="
+                    detail = f"{metric_name}={actual:g} {operator} {float(threshold):g}"
+                    if ok:
+                        passed.append(f"{check_id}: {detail}")
+                    else:
+                        failures.append(f"{check_id}: metric_threshold_not_met ({detail})")
             else:
                 # A model response is not enough for required checks. It must
                 # explicitly contain evidence language before passing.
