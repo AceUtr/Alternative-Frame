@@ -4,6 +4,7 @@
 .pytest_tmp/
 .pytest_retry_tmp/
 .vscode/
+.venv/
 tmp/
 word/
 node_modules/
