@@ -2,6 +2,20 @@
 
 这是当前多 Agent Harness v0 的冻结副本，并增加了“用户自定义 API 模型”的能力。
 
+## 全新环境安装
+
+要求 Python 3.11 或 3.12。Windows 建议使用 python.org 官方安装包，并在安装时保留 Tcl/Tk（Tkinter）组件。
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
+python -m pytest -q -p no:cacheprovider
+```
+
+正式运行代码仅使用 Python 标准库；`pytest` 是测试、科研实验和软件 Demo 验收所需的开发依赖。依赖版本记录在 `requirements.txt` 与 `requirements-dev.txt`，API Key 不应写入任何文件。
+
 ## 默认本地 Demo
 
 不需要 API Key：
@@ -30,6 +44,8 @@ python ui.py
 
 UI 支持在“本地 Stub”和“API 模型”之间切换，并可填写 Base URL、API Key、模型名称、Temperature 和 Max Tokens。可先使用“测试连接”验证配置，再用同一个用户指定模型驱动主 Agent 和全部角色子 Agent。API Key 仅保存在窗口内存中。
 
+比赛演示时可直接选择 `Research Demo (offline)` 或 `Software Demo (offline)`。两者均不需要 API Key，并提供 `normal/task-retry/local-recovery` 或 `none/retry-once/local-recovery` 故障情景；运行前必须预览并确认验收合同，完成后 UI 会显示 DAG、验收证据、状态文件和产物路径。
+
 该接口是 OpenAI-compatible 形式，因此可用于兼容该协议的主流模型服务。真实 API Key 只通过环境变量传入，不写入代码和日志。
 
 ## v0.1 当前边界
@@ -37,9 +53,10 @@ UI 支持在“本地 Stub”和“API 模型”之间切换，并可填写 Base
 - 已实现：模型配置、OpenAI-compatible Chat API 客户端、主/子 Agent 共享同一模型、角色提示词隔离、API 失败结构化返回。
 - 已实现：`FileEditor`、`ShellRunner`、`TestRunner`、`GitClient`、`ExperimentRunner`、`ToolRegistry` 和 `ToolCallingAgent` 第一版。
 - 已保留：本地 stub、任务规划、任务 DAG、并行编排、重试、科研与软件工程模板、UI v0。
-- 尚未完成：把工具调用循环和工具权限接入 UI、真实任务工作区、记忆、动态拓扑和端边云调度。
+- 已集成：科研与软件工程双 Demo、工具执行、三层恢复证据、端边云运行视图和评测门禁。
+- 当前边界：双 Demo 是确定性离线比赛场景；尚不宣称具备物理端边云部署、任意外部故障恢复、跨运行长期记忆或完全动态拓扑。
 
-工具层已具备接口和本地执行实现；要在 UI 中启用真实工具调用，还需要把 API 模型返回的 tool call 与角色权限配置接入 `ui.py`，并在真实 workspace 中执行软件工程/科研任务。
+工具层已通过冻结的科研与软件工程工作区接入 UI。通用 API 模式仍依赖 OpenAI-compatible 模型正确返回约定的结构化工具调用。
 
 ## 运行 baseline 与指标记录
 

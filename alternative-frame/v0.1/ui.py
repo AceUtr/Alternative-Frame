@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import queue
+import re
 import threading
 import tkinter as tk
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Dict
@@ -41,7 +44,9 @@ from core.preflight import HarnessPreflightChecker
 from core.tools import ExperimentRunner, FileEditor, GitClient, ShellRunner, TestRunner, ToolRegistry
 from run_api_demo import ROLE_PROMPTS
 from run_research_demo import FAULT_SCENARIOS, GOAL as RESEARCH_GOAL, run_demo as run_research_demo
+from run_software_demo import GOAL as SOFTWARE_GOAL, SCENARIOS as SOFTWARE_SCENARIOS, run_demo as run_software_demo
 from domains.research_demo import ResearchDomainAdapter
+from domains.software_demo import SoftwareDomainAdapter
 
 
 COLORS = {
@@ -63,7 +68,13 @@ PROJECT_DIR = Path(__file__).resolve().parent
 RUNTIME_VIEW_SCHEMA_VERSION = "1.0"
 TOOL_TEST_WORKSPACE = PROJECT_DIR / "tool_test_workspace"
 RESEARCH_EXECUTION_MODE = "Research Demo (offline)"
-DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务", RESEARCH_EXECUTION_MODE)
+SOFTWARE_EXECUTION_MODE = "Software Demo (offline)"
+DEFAULT_EXECUTION_MODES = (
+    "标准多 Agent",
+    "长程任务",
+    RESEARCH_EXECUTION_MODE,
+    SOFTWARE_EXECUTION_MODE,
+)
 DEVELOPER_EXECUTION_MODES = ("工具调用自检", "失败修复自检")
 
 
@@ -122,6 +133,70 @@ def run_research_ui_bridge(
         (report, LongHorizonStore(runs_root).state_path(report.state.run_id), fixture_root / "artifacts" / "research_report.md"),
     )
     return report
+
+
+def run_software_ui_bridge(
+    *,
+    runs_root: Path,
+    fault_scenario: str,
+    confirm_contract,
+    event_sink,
+    runner=run_software_demo,
+):
+    """Run the frozen software CLI logic and expose its durable evidence to the UI."""
+    adapter = SoftwareDomainAdapter()
+    contract = adapter.build_contract(SOFTWARE_GOAL)
+    confirmed = confirm_contract(contract)
+    if confirmed is None:
+        event_sink("run_cancelled", "用户取消了软件验收合同，未启动 Controller 或工具")
+        return None
+    ContractValidator().validate(confirmed, expected_goal=SOFTWARE_GOAL)
+    event_sink(
+        "contract_confirmed",
+        {
+            "criterion_count": len(confirmed.criteria),
+            "required_count": sum(item.required for item in confirmed.criteria),
+        },
+    )
+    plan = adapter.build_plan(SOFTWARE_GOAL)
+    event_sink("plan", ("software", plan))
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        exit_code = runner(fault_scenario, str(runs_root))
+    output = stdout.getvalue() + stderr.getvalue()
+    match = re.search(r"^Runtime root:\s*(.+)$", output, re.MULTILINE)
+    if exit_code != 0 or not match:
+        raise RuntimeError(output.strip() or f"Software Demo exited with code {exit_code}")
+
+    runtime_root = Path(match.group(1).strip())
+    state_path = runtime_root / "state.json"
+    events_path = runtime_root / "events.jsonl"
+    if not state_path.is_file() or not events_path.is_file():
+        raise RuntimeError(f"Software Demo 缺少持久化证据: {runtime_root}")
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    result = {
+        "status": state.get("status"),
+        "phase_count": int(state.get("phase", 0)),
+        "runtime_root": runtime_root,
+        "state_path": state_path,
+        "events_path": events_path,
+        "events": events,
+        "state": state,
+        "artifacts": [
+            runtime_root / "workspace" / "artifacts" / name
+            for name in ("software_report.md", "code_diff.patch", "test_log.txt")
+        ],
+        "output": output.strip(),
+    }
+    event_sink("software_report", result)
+    return result
 
 
 def long_horizon_runs_root() -> Path:
@@ -760,16 +835,25 @@ class FreshUI(tk.Tk):
         self.execution_mode_box.pack(side=tk.LEFT)
         self.execution_mode_box.bind("<<ComboboxSelected>>", self._on_execution_mode_changed)
         self.research_fault_scenario = tk.StringVar(value="normal")
-        ttk.Label(actions, text="Research scenario:").pack(side=tk.LEFT, padx=(12, 4))
-        ttk.Combobox(
+        self.research_scenario_label = ttk.Label(actions, text="Research scenario:")
+        self.research_scenario_box = ttk.Combobox(
             actions,
             textvariable=self.research_fault_scenario,
             state="readonly",
             values=FAULT_SCENARIOS,
             width=14,
-        ).pack(side=tk.LEFT)
+        )
+        self.software_fault_scenario = tk.StringVar(value="none")
+        self.software_scenario_label = ttk.Label(actions, text="Software scenario:")
+        self.software_scenario_box = ttk.Combobox(
+            actions,
+            textvariable=self.software_fault_scenario,
+            state="readonly",
+            values=SOFTWARE_SCENARIOS,
+            width=14,
+        )
         self.developer_mode = tk.BooleanVar(value=False)
-        tk.Checkbutton(
+        self.developer_toggle = tk.Checkbutton(
             actions,
             text="开发者模式",
             variable=self.developer_mode,
@@ -779,7 +863,8 @@ class FreshUI(tk.Tk):
             activebackground=COLORS["card"],
             selectcolor=COLORS["card"],
             font=("Microsoft YaHei UI", 9),
-        ).pack(side=tk.LEFT, padx=(10, 0))
+        )
+        self.developer_toggle.pack(side=tk.LEFT, padx=(10, 0))
         self.run_btn = ttk.Button(actions, text="开始协作  →", style="Accent.TButton", command=self.start_run)
         self.run_btn.pack(side=tk.RIGHT)
         self.pause_btn = ttk.Button(actions, text="暂停", style="Soft.TButton", command=self.pause_run, state=tk.DISABLED)
@@ -795,9 +880,28 @@ class FreshUI(tk.Tk):
 
     def _on_execution_mode_changed(self, _event=None):
         mode = self.execution_mode.get()
+        for widget in (
+            self.research_scenario_label,
+            self.research_scenario_box,
+            self.software_scenario_label,
+            self.software_scenario_box,
+        ):
+            widget.pack_forget()
         if mode == RESEARCH_EXECUTION_MODE:
+            self.research_scenario_label.pack(
+                side=tk.LEFT, padx=(12, 4), before=self.developer_toggle
+            )
+            self.research_scenario_box.pack(side=tk.LEFT, before=self.developer_toggle)
             self.goal.delete("1.0", tk.END)
             self.goal.insert("1.0", RESEARCH_GOAL)
+            return
+        if mode == SOFTWARE_EXECUTION_MODE:
+            self.software_scenario_label.pack(
+                side=tk.LEFT, padx=(12, 4), before=self.developer_toggle
+            )
+            self.software_scenario_box.pack(side=tk.LEFT, before=self.developer_toggle)
+            self.goal.delete("1.0", tk.END)
+            self.goal.insert("1.0", SOFTWARE_GOAL)
             return
         if mode not in ("工具调用自检", "失败修复自检"):
             return
@@ -1036,7 +1140,11 @@ class FreshUI(tk.Tk):
 
     def test_connection(self):
         try:
-            config = None if self.execution_mode.get() == RESEARCH_EXECUTION_MODE else self._config()
+            config = (
+                None
+                if self.execution_mode.get() in (RESEARCH_EXECUTION_MODE, SOFTWARE_EXECUTION_MODE)
+                else self._config()
+            )
         except Exception as exc:
             messagebox.showwarning("配置不完整", str(exc))
             return
@@ -1063,7 +1171,11 @@ class FreshUI(tk.Tk):
             messagebox.showwarning("缺少任务", "请输入任务目标。")
             return
         try:
-            config = self._config()
+            config = (
+                None
+                if self.execution_mode.get() in (RESEARCH_EXECUTION_MODE, SOFTWARE_EXECUTION_MODE)
+                else self._config()
+            )
         except Exception as exc:
             messagebox.showwarning("模型配置错误", str(exc))
             return
@@ -1187,6 +1299,20 @@ class FreshUI(tk.Tk):
                     "long_horizon_report",
                     (report, store.state_path(report.state.run_id)),
                 ))
+                return
+            if execution_mode == SOFTWARE_EXECUTION_MODE:
+                contract_reply = queue.Queue(maxsize=1)
+
+                def confirm_software_contract(contract):
+                    self.events.put(("contract_preview_request", (contract, contract_reply)))
+                    return contract_reply.get()
+
+                run_software_ui_bridge(
+                    runs_root=long_horizon_runs_root() / "software",
+                    fault_scenario=self.software_fault_scenario.get(),
+                    confirm_contract=confirm_software_contract,
+                    event_sink=lambda kind, payload: self.events.put((kind, payload)),
+                )
                 return
             pipeline = PlanningPipeline()
             tool_test = execution_mode in DEVELOPER_EXECUTION_MODES
@@ -1419,6 +1545,8 @@ class FreshUI(tk.Tk):
                     self._show_long_horizon_event(payload)
                 elif kind == "long_horizon_report":
                     self._show_long_horizon_report(payload)
+                elif kind == "software_report":
+                    self._show_software_report(payload)
                 elif kind == "replanner_event":
                     self._show_replanner_event(payload)
                 elif kind == "initial_plan_event":
@@ -1661,6 +1789,50 @@ class FreshUI(tk.Tk):
             else COLORS["danger"]
         )
         self._set_state(f"长程任务 · {state.status} · {state.phase} 阶段", color)
+
+    def _show_software_report(self, payload):
+        state = payload["state"]
+        completed = {
+            str(item).split(":")[-1] for item in state.get("completed_tasks", [])
+        }
+        for task_id in completed:
+            item = self.task_items.get(task_id)
+            if item:
+                values = list(self.tree.item(item, "values"))
+                values[3] = "success"
+                self.tree.item(item, values=values)
+            self._set_dag_status(task_id, "success")
+
+        evaluation = state.get("last_evaluation") or {}
+        self._render_evidence(evaluation.get("results", []))
+        self.append_log(
+            f"Software Demo → status={payload['status']} · phases={payload['phase_count']}"
+        )
+        for event in payload["events"]:
+            if event.get("event") == "retry_summary":
+                detail = event.get("payload", {})
+                self.append_log(
+                    f"RETRY → implement_fix attempts={detail.get('attempts', '?')}"
+                )
+            elif event.get("event") == "local_recovery_started":
+                detail = event.get("payload", {})
+                self.append_log(
+                    "LOCAL RECOVERY → "
+                    f"frozen={detail.get('frozen', [])} · impacted={detail.get('impacted', [])}"
+                )
+        for artifact in payload["artifacts"]:
+            self.append_log(f"ARTIFACT → {artifact}")
+        self.append_log(f"STATE → {payload['state_path']}")
+        self.append_log(f"EVENTS → {payload['events_path']}")
+        self.running = False
+        self.active_controller = None
+        self.run_btn.configure(state=tk.NORMAL)
+        self.pause_btn.configure(state=tk.DISABLED)
+        color = COLORS["success"] if payload["status"] == "completed" else COLORS["danger"]
+        self._set_state(
+            f"软件 Demo · {payload['status']} · {payload['phase_count']} 阶段",
+            color,
+        )
 
     def _show_replanner_event(self, payload):
         event, detail = payload
