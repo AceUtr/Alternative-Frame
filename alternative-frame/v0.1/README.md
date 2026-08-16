@@ -46,6 +46,14 @@ UI 支持在“本地 Stub”和“API 模型”之间切换，并可填写 Base
 
 比赛演示时可直接选择 `Research Demo (offline)` 或 `Software Demo (offline)`。两者均不需要 API Key，并提供 `normal/task-retry/local-recovery` 或 `none/retry-once/local-recovery` 故障情景；运行前必须预览并确认验收合同，完成后 UI 会显示 DAG、验收证据、状态文件和产物路径。
 
+双 Demo 连续稳定性验收使用隔离工作区各运行三次，并保存逐轮状态、事件、产物哈希与汇总报告：
+
+```powershell
+python validation/run_demo_stability.py
+```
+
+报告默认写入 `reports/demo-stability/<UTC timestamp>/summary.json` 和 `summary.md`。任意一轮状态、阶段、完成事件或必需产物缺失都会使脚本以非零状态退出。
+
 该接口是 OpenAI-compatible 形式，因此可用于兼容该协议的主流模型服务。真实 API Key 只通过环境变量传入，不写入代码和日志。
 
 ## v0.1 当前边界
