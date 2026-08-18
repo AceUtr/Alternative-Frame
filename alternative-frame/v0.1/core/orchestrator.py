@@ -11,6 +11,7 @@ from .agents import AgentRegistry
 from .acceptance import AcceptanceEvaluator
 from .models import AgentResult, Plan, SubTask, utc_now
 from .retry import RetryFailureClassifier
+from .communication import TopKCommunicationRouter
 
 
 @dataclass
@@ -31,12 +32,14 @@ class RunReport:
 class Orchestrator:
     """Centralized Main Agent coordinator with dependency-aware parallelism."""
 
-    def __init__(self, registry: AgentRegistry, max_workers: int = 4, on_event: Callable | None = None, acceptance: AcceptanceEvaluator | None = None, retry_classifier: RetryFailureClassifier | None = None) -> None:
+    def __init__(self, registry: AgentRegistry, max_workers: int = 4, on_event: Callable | None = None, acceptance: AcceptanceEvaluator | None = None, retry_classifier: RetryFailureClassifier | None = None, communication_router: TopKCommunicationRouter | None = None, on_communication_event: Callable | None = None) -> None:
         self.registry = registry
         self.max_workers = max_workers
         self.on_event = on_event
         self.acceptance = acceptance
         self.retry_classifier = retry_classifier or RetryFailureClassifier()
+        self.communication_router = communication_router
+        self.on_communication_event = on_communication_event
         self._lock = Lock()
 
     def _emit(self, event: str, task: SubTask, result=None) -> None:
@@ -72,10 +75,10 @@ class Orchestrator:
 
             if parallel and len(ready) > 1:
                 with ThreadPoolExecutor(max_workers=min(self.max_workers, len(ready))) as pool:
-                    futures = {pool.submit(self._run_with_retry, task, results): task for task in ready}
+                    futures = {pool.submit(self._run_with_retry, task, results, task_map): task for task in ready}
                     batch = [future.result() for future in as_completed(futures)]
             else:
-                batch = [self._run_with_retry(task, results) for task in ready]
+                batch = [self._run_with_retry(task, results, task_map) for task in ready]
 
             for task, result in batch:
                 results[task.id] = result
@@ -86,8 +89,18 @@ class Orchestrator:
         status = "success" if len(results) == len(task_map) and all(r.status == "success" for r in results.values()) else "failed"
         return RunReport(plan.goal, status, results, rounds, started, utc_now(), failures, started_epoch=started_epoch, finished_epoch=time.perf_counter())
 
-    def _run_with_retry(self, task: SubTask, current: Mapping[str, AgentResult]):
+    def _run_with_retry(self, task: SubTask, current: Mapping[str, AgentResult], task_map=None):
         agent = self.registry.get(task.role)
+        agent_context = dict(current)
+        communication_decision = None
+        if self.communication_router:
+            agent_context, communication_decision = self.communication_router.route(
+                task,
+                current,
+                task_map or {task.id: task},
+            )
+            if self.on_communication_event:
+                self.on_communication_event("communication_routed", communication_decision)
         last = None
         accumulated_artifacts = []
         accumulated_evidence = []
@@ -96,11 +109,13 @@ class Orchestrator:
         for attempt in range(1, task.max_retries + 2):
             attempt_task = deepcopy(task)
             attempt_task.metadata["runtime_attempt"] = attempt
+            if communication_decision:
+                attempt_task.metadata["communication_route"] = communication_decision.to_dict()
             if retry_feedback:
                 attempt_task.metadata["retry_feedback"] = retry_feedback.to_dict()
             self._emit("task_started", attempt_task)
             try:
-                last = agent.run(attempt_task, dict(current))
+                last = agent.run(attempt_task, dict(agent_context))
             except Exception as exc:
                 last = AgentResult(
                     task.id,

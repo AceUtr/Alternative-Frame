@@ -113,3 +113,5 @@ API 与本地 Stub 的长程模式都会在执行前弹出合同预览窗口。�
 长程初始 DAG 现由确认合同直接生成，不再执行固定的软件认证模板。每个标准和文件必须有唯一责任任务，计划不得发明合同外路径；模型计划失败时自动切换规则型合同 DAG。Replanner 支持超时重试、退避和缺失标准驱动的确定性恢复，双重失败时保存为可恢复状态。详见 [`docs/milestone-8-contract-native-dag-resilience.md`](docs/milestone-8-contract-native-dag-resilience.md)。
 
 阶段内局部 DAG 恢复现已位于任务重试和跨阶段 Replanner 之间：系统冻结成功节点，只重建失败节点及其受影响下游子图，并将局部执行计入总任务预算。UI 同时提供任务表、实时 DAG 和逐条合同证据视图。详见 [`docs/milestone-9-local-dag-recovery-visualization.md`](docs/milestone-9-local-dag-recovery-visualization.md)。
+
+动态 Top-k 通信 MVP 通过中心化稀疏路由控制长任务上下文：合同依赖结果始终保留，其他 Agent 结果按输入产物、角色和主题相关性评分，只向当前 Agent 传递 Top-k 条可选消息。路由选择及评分理由可独立持久化，不改变 `Agent.run(SubTask, context)` 冻结接口。详见 [`docs/milestone-10-dynamic-topk-communication.md`](docs/milestone-10-dynamic-topk-communication.md)。
