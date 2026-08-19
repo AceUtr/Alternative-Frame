@@ -2,12 +2,13 @@
 
 ## Current integrated baseline
 
-- Full regression after Top-k and memory additions: `234 passed`.
+- Full regression after Top-k and memory additions: `235 passed`.
 - Research Demo stability: 3/3 isolated normal runs completed.
 - Software Demo stability: 3/3 isolated normal runs completed.
 - Research, software, edge-cloud and evaluation contribution gates: passed in the clean-clone verification.
 - Real-model two-phase run: `real_two_phase_424a26df`, completed in 2 phases; first-phase evidence omission triggered replanning and the second phase created `FINAL_EVIDENCE.md`.
 - Token usage for that run is explicitly `unknown` because the CCswitch provider response omitted `usage`.
+- The latest four contribution gates (research, software, edge-cloud and evaluation) all passed on 2026-08-19.
 
 ## Fault coverage
 
