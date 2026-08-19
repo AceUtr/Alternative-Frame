@@ -11,6 +11,7 @@ from ..local_recovery import LocalDAGRecoveryController
 from .evaluator import GoalEvaluation, ReportStatusEvaluator
 from .state import LongHorizonState, PhaseRecord, plan_from_dict, plan_to_dict
 from .store import LongHorizonStore
+from ..memory import ThreeLayerMemory
 
 
 InitialPlanner = Callable[[LongHorizonState], Plan]
@@ -57,6 +58,7 @@ class LongHorizonController:
         self.on_event = on_event
         self.acceptance_contract = acceptance_contract
         self.local_recovery = local_recovery
+        self.memory: ThreeLayerMemory | None = None
         self._pause_requested = Event()
 
     def request_pause(self) -> None:
@@ -72,6 +74,17 @@ class LongHorizonController:
             raise ValueError("goal cannot be empty")
         run_id = run_id or uuid4().hex[:12]
         state = self._load_or_create(goal.strip(), run_id, resume)
+        state_path = self.store.state_path(run_id)
+        run_dir = state_path.parent if hasattr(state_path, "parent") else None
+        memory_path = run_dir / "memory.json" if run_dir is not None else None
+        self.memory = (
+            ThreeLayerMemory.load(memory_path)
+            if resume and memory_path is not None and memory_path.is_file()
+            else ThreeLayerMemory(run_dir) if run_dir is not None else None
+        )
+        if self.memory is not None:
+            self.memory.remember("goal", goal.strip(), layer="working", source="controller")
+            self.memory.persist(memory_path)
         phase_reports: List[RunReport] = []
         if resume:
             self._pause_requested.clear()
@@ -120,6 +133,15 @@ class LongHorizonController:
 
                 phase_number = state.phase + 1
                 state.pending_plan = plan_to_dict(plan)
+                if self.memory is not None:
+                    self.memory.remember(
+                    f"phase-{phase_number}-plan",
+                    {"task_ids": [task.id for task in plan.subtasks], "goal": plan.goal},
+                    layer="episodic",
+                    source="controller",
+                    phase=phase_number,
+                    tags=["plan"],
+                    )
                 self._persist(
                     state,
                     "phase_planned",
@@ -154,6 +176,15 @@ class LongHorizonController:
                 self._persist(state, "phase_finished", {"phase": phase_number, **evaluation.to_dict()})
 
                 if evaluation.completed:
+                    if self.memory is not None:
+                        self.memory.remember(
+                        "final_evaluation",
+                        evaluation.to_dict(),
+                        layer="durable",
+                        source="global_evaluator",
+                        phase=phase_number,
+                        tags=["acceptance", "completed"],
+                        )
                     state.status = "completed"
                     state.decisions.append(f"phase {phase_number}: final goal accepted - {evaluation.reason}")
                     self._persist(state, "run_completed", {"phase": phase_number})
@@ -258,5 +289,17 @@ class LongHorizonController:
     def _persist(self, state: LongHorizonState, event: str, payload: dict) -> None:
         self.store.save(state)
         self.store.append_event(state.run_id, event, payload)
+        if self.memory is not None:
+            self.memory.remember(
+                f"event-{event}-{len(self.memory.episodic)}",
+                {"event": event, "payload": payload},
+                layer="episodic",
+                source="controller",
+                phase=state.phase,
+                tags=["trajectory"],
+            )
+            state_path = self.store.state_path(state.run_id)
+            if hasattr(state_path, "parent"):
+                self.memory.persist(state_path.parent / "memory.json")
         if self.on_event:
             self.on_event(event, payload)
