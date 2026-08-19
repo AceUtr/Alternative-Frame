@@ -41,6 +41,8 @@ alternative-frame/v0.1/runs/long_horizon/*
 !alternative-frame/v0.1/runs/long_horizon/.gitkeep
 alternative-frame/v0.1/runs/research/
 alternative-frame/v0.1/runs/software/
+alternative-frame/v0.1/runs/real_two_phase/
+alternative-frame/v0.1/reports/fault-matrix/
 
 # D evaluation generated artifacts
 alternative-frame/v0.1/benchmarks/results/
