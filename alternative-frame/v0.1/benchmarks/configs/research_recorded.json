@@ -1,0 +1,19 @@
+﻿{
+  "name": "research_recorded",
+  "description": "Real recorded research-demo runs from 2026-08-12",
+  "evidence_kind": "recorded_real_run",
+  "cases": [
+    {
+      "name": "research_normal",
+      "run_dir": "tests/fixtures/research_evaluation/normal",
+      "domain": "research",
+      "mode": "normal"
+    },
+    {
+      "name": "research_local_recovery",
+      "run_dir": "tests/fixtures/research_evaluation/local_recovery",
+      "domain": "research",
+      "mode": "local_recovery"
+    }
+  ]
+}

@@ -128,7 +128,7 @@ class HardEvidenceGate:
         expected = self._normalize_command(criterion.command)
         matches = []
         for record in bundle.tool_records:
-            if record.get("tool") not in ("test_runner", "shell_runner"):
+            if record.get("tool") not in ("test_runner", "shell_runner", "experiment_runner"):
                 continue
             actual = self._normalize_command(record.get("arguments", {}).get("command", ""))
             if actual == expected and record.get("success") is True and record.get("exit_code") == 0:
@@ -151,6 +151,8 @@ class HardEvidenceGate:
             return CriterionResult(criterion.id, "deferred", "metric name or threshold requires semantic review")
         values = []
         for record in bundle.tool_records:
+            if record.get("success") is not True:
+                continue
             metrics = record.get("metadata", {}).get("metrics", {})
             if criterion.metric_name in metrics:
                 values.append(float(metrics[criterion.metric_name]))

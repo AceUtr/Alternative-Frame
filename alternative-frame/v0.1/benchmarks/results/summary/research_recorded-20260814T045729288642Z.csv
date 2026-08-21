@@ -1,0 +1,3 @@
+﻿case,run_id,evidence_kind,status,final_goal_completed,task_count,success_count,failed_count,task_success_rate,first_pass_count,first_pass_rate,retry_count,local_recovery_count,phase_count,duration_seconds,tool_calls,successful_tool_calls,tool_success_rate,prompt_tokens,completion_tokens,total_tokens,estimated_cost
+research_normal,research-normal-20260812,recorded_real_run,completed,True,8,8,0,1.0,8,1.0,0,0,2,0.43573,8,8,1.0,,,,
+research_local_recovery,research-local-recovery-20260812,recorded_real_run,completed,True,11,8,0,0.7272727272727273,7,0.875,0,1,2,0.505034,8,8,1.0,,,,

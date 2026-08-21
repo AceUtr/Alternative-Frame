@@ -1,0 +1,29 @@
+{
+  "benchmark_name": "smoke",
+  "output_root": "benchmarks/results",
+  "workspace_root": "benchmarks/workspaces",
+  "cases": [
+    {
+      "name": "research-multi",
+      "domain": "research",
+      "task": "research_plan",
+      "mode": "multi_agent",
+      "repeats": 2,
+      "model": "deterministic",
+      "seed": 42,
+      "max_workers": 4,
+      "budget": {"max_tasks": 10}
+    },
+    {
+      "name": "software-single",
+      "domain": "software_engineering",
+      "task": "software_plan",
+      "mode": "single_agent",
+      "repeats": 2,
+      "model": "deterministic",
+      "seed": 42,
+      "max_workers": 1,
+      "budget": {"max_tasks": 10}
+    }
+  ]
+}

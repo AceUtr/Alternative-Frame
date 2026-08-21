@@ -1,0 +1,34 @@
+{
+  "experiment": "deterministic_contract_ablation",
+  "evidence_kind": "deterministic_controlled_run",
+  "generated_at": "2026-08-14T05:26:57.961412+00:00",
+  "results": [
+    {
+      "mode": "contract_off",
+      "completed": true,
+      "reason": "all phase tasks and their acceptance checks passed",
+      "satisfied_criteria": [],
+      "missing_criteria": [],
+      "failures": [],
+      "phase_report_status": "success",
+      "evidence_kind": "deterministic_controlled_run"
+    },
+    {
+      "mode": "contract_on",
+      "completed": false,
+      "reason": "deterministic contract acceptance gates did not pass",
+      "satisfied_criteria": [
+        "source",
+        "tests"
+      ],
+      "missing_criteria": [
+        "final_evidence"
+      ],
+      "failures": [
+        "final_evidence: missing required output: FINAL_EVIDENCE.md"
+      ],
+      "phase_report_status": "success",
+      "evidence_kind": "deterministic_controlled_run"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+﻿{
+  "name": "deterministic_agent_ablation",
+  "description": "Controlled single-backend vs multi-agent orchestration experiment without model API.",
+  "evidence_kind": "deterministic_controlled_run",
+  "modes": ["single_agent", "multi_agent"],
+  "task_delay_seconds": 0.08,
+  "repeats": 5
+}

@@ -1,9 +1,10 @@
-# Local tooling and caches
+﻿# Local tooling and caches
 .agents/
 .pytest_cache/
 .pytest_tmp/
 .pytest_retry_tmp/
 .vscode/
+.venv/
 tmp/
 word/
 node_modules/
@@ -29,6 +30,7 @@ __pycache__/
 alternative-frame/v0.1/requirements.md
 alternative-frame/v0.1/architecture.md
 alternative-frame/v0.1/retry_demo/
+alternative-frame/v0.1/.validation_tmp/
 alternative-frame/v0.1/src/
 alternative-frame/v0.1/tests/test_auth_service.py
 alternative-frame/v0.1/tests/test_requirements_acceptance.py
@@ -37,3 +39,25 @@ alternative-frame/v0.1/tests/test_word_counter.py
 # Long-horizon runtime state (keep the directory, not individual runs)
 alternative-frame/v0.1/runs/long_horizon/*
 !alternative-frame/v0.1/runs/long_horizon/.gitkeep
+alternative-frame/v0.1/runs/research/
+alternative-frame/v0.1/runs/software/
+alternative-frame/v0.1/runs/real_two_phase/
+alternative-frame/v0.1/reports/fault-matrix/
+
+# D evaluation generated artifacts
+alternative-frame/v0.1/benchmarks/results/
+alternative-frame/v0.1/benchmarks/workspaces/
+alternative-frame/v0.1/reports/real_evaluation/
+alternative-frame/v0.1/reports/unified_evaluation/
+alternative-frame/v0.1/reports/unified_evaluation_v2/
+
+# D recovery ablation runtime workspaces
+alternative-frame/v0.1/runs/recovery_ablation/
+
+# C edge-cloud runtime workspaces
+alternative-frame/v0.1/runs/edge_cloud_long_horizon/*
+alternative-frame/v0.1/runs/edge_cloud_replan/*
+
+# Final competition generated report
+alternative-frame/v0.1/reports/competition_final/
+alternative-frame/v0.1/reports/demo-stability/

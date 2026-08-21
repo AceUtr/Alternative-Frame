@@ -1,0 +1,549 @@
+{
+  "run_id": "research-local-recovery-20260812",
+  "goal": "Run a reproducible baseline and improved experiment, independently verify metrics, and produce a report",
+  "max_phases": 2,
+  "max_total_tasks": 12,
+  "status": "completed",
+  "phase": 2,
+  "total_tasks": 11,
+  "completed_tasks": [
+    "phase-1:generate_dataset",
+    "phase-1:inspect_dataset",
+    "phase-1:run_baseline",
+    "phase-1:run_improved",
+    "phase-1:compare_experiments",
+    "phase-1:build_initial_report",
+    "phase-2:verify_best",
+    "phase-2:update_research_report"
+  ],
+  "failed_tasks": [],
+  "artifacts": [
+    "data/dataset.json",
+    "artifacts/dataset_summary.json",
+    "artifacts/baseline_metrics.json",
+    "artifacts/improved_metrics.json",
+    "artifacts/best_config.json",
+    "artifacts/comparison.png",
+    "artifacts/research_report.md",
+    "artifacts/verification_metrics.json"
+  ],
+  "evidence_records": [
+    {
+      "tool": "experiment_runner",
+      "arguments": {
+        "command": "python generate_dataset.py --output data/dataset.json"
+      },
+      "success": true,
+      "exit_code": 0,
+      "duration_seconds": 0.086,
+      "metadata": {
+        "command": "python generate_dataset.py --output data/dataset.json",
+        "metrics": {
+          "dataset_rows": 200.0,
+          "seed": 1729.0
+        },
+        "artifacts": [
+          "data/dataset.json"
+        ]
+      },
+      "output_excerpt": "dataset_rows=200\nseed=1729\n"
+    },
+    {
+      "tool": "dataset_inspector",
+      "arguments": {
+        "dataset_path": "data/dataset.json",
+        "output_path": "artifacts/dataset_summary.json",
+        "required_fields": [
+          "x1",
+          "x2",
+          "label"
+        ],
+        "field_types": {
+          "id": "integer",
+          "x1": "number",
+          "x2": "number",
+          "label": "integer"
+        },
+        "allowed_labels": [
+          0,
+          1
+        ],
+        "required_provenance": [
+          "source",
+          "generator",
+          "license"
+        ]
+      },
+      "success": true,
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "metadata": {
+        "artifacts": [
+          "artifacts/dataset_summary.json"
+        ],
+        "dataset": {
+          "dataset_version": "synthetic-centroids-v2",
+          "seed": 1729,
+          "provenance": {
+            "source": "synthetic_generated",
+            "generator": "generate_dataset.py",
+            "license": "project_fixture"
+          },
+          "sha256": "b8a1cb423374acdad05c5c0bc13c5ec97c8088bed73e0cb14aa64064bbf795dd",
+          "rows": 200,
+          "train_rows": 160,
+          "test_rows": 40,
+          "columns": [
+            "id",
+            "label",
+            "x1",
+            "x2"
+          ],
+          "label_distribution": {
+            "0": 100,
+            "1": 100
+          }
+        }
+      },
+      "output_excerpt": "inspected 200 rows"
+    },
+    {
+      "tool": "experiment_runner",
+      "arguments": {
+        "command": "python run_baseline.py --dataset data/dataset.json --output artifacts/baseline_metrics.json"
+      },
+      "success": true,
+      "exit_code": 0,
+      "duration_seconds": 0.097,
+      "metadata": {
+        "command": "python run_baseline.py --dataset data/dataset.json --output artifacts/baseline_metrics.json",
+        "metrics": {
+          "accuracy": 0.8,
+          "test_rows": 40.0
+        },
+        "artifacts": [
+          "artifacts/baseline_metrics.json"
+        ]
+      },
+      "output_excerpt": "accuracy=0.800000\ntest_rows=40\n"
+    },
+    {
+      "tool": "experiment_runner",
+      "arguments": {
+        "command": "python run_improved.py --dataset data/dataset.json --output artifacts/improved_metrics.json"
+      },
+      "success": true,
+      "exit_code": 0,
+      "duration_seconds": 0.107,
+      "metadata": {
+        "command": "python run_improved.py --dataset data/dataset.json --output artifacts/improved_metrics.json",
+        "metrics": {
+          "accuracy": 0.95,
+          "test_rows": 40.0
+        },
+        "artifacts": [
+          "artifacts/improved_metrics.json"
+        ]
+      },
+      "output_excerpt": "accuracy=0.950000\ntest_rows=40\n"
+    },
+    {
+      "tool": "metric_comparator",
+      "arguments": {
+        "metric_files": [
+          "artifacts/baseline_metrics.json",
+          "artifacts/improved_metrics.json"
+        ],
+        "primary_metric": "accuracy",
+        "mode": "max",
+        "output_path": "artifacts/best_config.json"
+      },
+      "success": true,
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "metadata": {
+        "artifacts": [
+          "artifacts/best_config.json"
+        ],
+        "metrics": {
+          "best_score": 0.95
+        },
+        "best_experiment": "nearest_centroid_two_features_v1"
+      },
+      "output_excerpt": "selected nearest_centroid_two_features_v1"
+    },
+    {
+      "tool": "research_report_builder",
+      "arguments": {
+        "baseline_metrics_path": "artifacts/baseline_metrics.json",
+        "improved_metrics_path": "artifacts/improved_metrics.json",
+        "best_config_path": "artifacts/best_config.json",
+        "verification_metrics_path": "artifacts/verification_metrics.json",
+        "chart_path": "artifacts/comparison.png",
+        "report_path": "artifacts/research_report.md"
+      },
+      "success": true,
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "metadata": {
+        "artifacts": [
+          "artifacts/comparison.png",
+          "artifacts/research_report.md"
+        ],
+        "metrics": {
+          "improvement_delta": 0.1499999999999999
+        },
+        "verification_status": "pending"
+      },
+      "output_excerpt": "report generated; verification=pending"
+    },
+    {
+      "tool": "experiment_runner",
+      "arguments": {
+        "command": "python verify_best.py --dataset data/dataset.json --config artifacts/best_config.json --output artifacts/verification_metrics.json --tolerance 0.000000001"
+      },
+      "success": true,
+      "exit_code": 0,
+      "duration_seconds": 0.13,
+      "metadata": {
+        "command": "python verify_best.py --dataset data/dataset.json --config artifacts/best_config.json --output artifacts/verification_metrics.json --tolerance 0.000000001",
+        "metrics": {
+          "accuracy": 0.95,
+          "verified_score": 0.95,
+          "verification_delta": 0.0
+        },
+        "artifacts": [
+          "artifacts/verification_metrics.json"
+        ]
+      },
+      "output_excerpt": "accuracy=0.950000\nverified_score=0.950000\nverification_delta=0.000000000000\n"
+    },
+    {
+      "tool": "research_report_builder",
+      "arguments": {
+        "baseline_metrics_path": "artifacts/baseline_metrics.json",
+        "improved_metrics_path": "artifacts/improved_metrics.json",
+        "best_config_path": "artifacts/best_config.json",
+        "verification_metrics_path": "artifacts/verification_metrics.json",
+        "chart_path": "artifacts/comparison.png",
+        "report_path": "artifacts/research_report.md"
+      },
+      "success": true,
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "metadata": {
+        "artifacts": [
+          "artifacts/comparison.png",
+          "artifacts/research_report.md"
+        ],
+        "metrics": {
+          "improvement_delta": 0.1499999999999999
+        },
+        "verification_status": "passed"
+      },
+      "output_excerpt": "report generated; verification=passed"
+    }
+  ],
+  "acceptance_contract": {
+    "goal": "Run a reproducible baseline and improved experiment, independently verify metrics, and produce a report",
+    "goal_summary": "Generate, inspect and execute a reproducible offline baseline",
+    "criteria": [
+      {
+        "id": "dataset_generated",
+        "description": "Fixed dataset exists with run provenance",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "data/dataset.json",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "dataset_summary",
+        "description": "Dataset inspection summary exists",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/dataset_summary.json",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "baseline_metrics",
+        "description": "Baseline metrics JSON exists",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/baseline_metrics.json",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "baseline_accuracy",
+        "description": "Baseline reaches the declared minimum accuracy",
+        "check_type": "metric",
+        "required": true,
+        "path": null,
+        "command": null,
+        "metric_name": "accuracy",
+        "threshold": 0.8
+      },
+      {
+        "id": "improved_metrics",
+        "description": "Improved metrics JSON exists",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/improved_metrics.json",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "improved_accuracy",
+        "description": "Improved experiment reaches the declared accuracy",
+        "check_type": "metric",
+        "required": true,
+        "path": null,
+        "command": null,
+        "metric_name": "accuracy",
+        "threshold": 0.9
+      },
+      {
+        "id": "best_config",
+        "description": "Best configuration is selected from compatible metrics",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/best_config.json",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "improvement_delta",
+        "description": "Improved accuracy is strictly better than baseline accuracy",
+        "check_type": "metric",
+        "required": true,
+        "path": null,
+        "command": null,
+        "metric_name": "improvement_delta",
+        "threshold": 1e-06
+      },
+      {
+        "id": "verification_metrics",
+        "description": "Best configuration is independently rerun",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/verification_metrics.json",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "verification_command",
+        "description": "Independent verification command exits successfully",
+        "check_type": "command",
+        "required": true,
+        "path": null,
+        "command": "python verify_best.py --dataset data/dataset.json --config artifacts/best_config.json --output artifacts/verification_metrics.json --tolerance 0.000000001",
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "comparison_chart",
+        "description": "Metric comparison chart exists",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/comparison.png",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "research_report",
+        "description": "Research report exists",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/research_report.md",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      }
+    ],
+    "constraints": [
+      "Offline execution only",
+      "Python 3.10+ standard library only",
+      "Dataset seed and split are fixed",
+      "Metrics must come from an experiment tool call"
+    ]
+  },
+  "decisions": [
+    "phase 1: continue - deterministic contract acceptance gates did not pass",
+    "phase 2: final goal accepted - all deterministic contract acceptance gates passed"
+  ],
+  "phases": [
+    {
+      "number": 1,
+      "plan_goal": "Run a reproducible baseline and improved experiment, independently verify metrics, and produce a report",
+      "task_ids": [
+        "generate_dataset",
+        "inspect_dataset",
+        "run_baseline",
+        "run_improved",
+        "compare_experiments",
+        "build_initial_report"
+      ],
+      "status": "incomplete",
+      "report_status": "success",
+      "evaluation": {
+        "completed": false,
+        "reason": "deterministic contract acceptance gates did not pass",
+        "satisfied_criteria": [
+          "dataset_generated",
+          "dataset_summary",
+          "baseline_metrics",
+          "baseline_accuracy",
+          "improved_metrics",
+          "improved_accuracy",
+          "best_config",
+          "improvement_delta",
+          "comparison_chart",
+          "research_report"
+        ],
+        "missing_criteria": [
+          "verification_metrics",
+          "verification_command"
+        ],
+        "failures": [
+          "verification_metrics: missing required output: artifacts/verification_metrics.json",
+          "verification_command: no successful exit-code-0 evidence for exact command: python verify_best.py --dataset data/dataset.json --config artifacts/best_config.json --output artifacts/verification_metrics.json --tolerance 0.000000001"
+        ],
+        "next_focus": [
+          "satisfy contract criterion: verification_metrics",
+          "satisfy contract criterion: verification_command"
+        ],
+        "evidence": [
+          "dataset_generated: artifact=data/dataset.json",
+          "dataset_summary: artifact=artifacts/dataset_summary.json",
+          "baseline_metrics: artifact=artifacts/baseline_metrics.json",
+          "baseline_accuracy: accuracy=0.95",
+          "improved_metrics: artifact=artifacts/improved_metrics.json",
+          "improved_accuracy: accuracy=0.95",
+          "best_config: artifact=artifacts/best_config.json",
+          "improvement_delta: improvement_delta=0.1499999999999999",
+          "comparison_chart: artifact=artifacts/comparison.png",
+          "research_report: artifact=artifacts/research_report.md"
+        ]
+      },
+      "failures": [],
+      "artifacts": [
+        "data/dataset.json",
+        "artifacts/dataset_summary.json",
+        "artifacts/baseline_metrics.json",
+        "artifacts/improved_metrics.json",
+        "artifacts/best_config.json",
+        "artifacts/comparison.png",
+        "artifacts/research_report.md"
+      ],
+      "started_at": "2026-08-12T05:29:34.953834+00:00",
+      "finished_at": "2026-08-12T05:29:35.290599+00:00",
+      "local_recovery_cycles": 1,
+      "executed_task_count": 9
+    },
+    {
+      "number": 2,
+      "plan_goal": "Run a reproducible baseline and improved experiment, independently verify metrics, and produce a report",
+      "task_ids": [
+        "verify_best",
+        "update_research_report"
+      ],
+      "status": "accepted",
+      "report_status": "success",
+      "evaluation": {
+        "completed": true,
+        "reason": "all deterministic contract acceptance gates passed",
+        "satisfied_criteria": [
+          "dataset_generated",
+          "dataset_summary",
+          "baseline_metrics",
+          "baseline_accuracy",
+          "improved_metrics",
+          "improved_accuracy",
+          "best_config",
+          "improvement_delta",
+          "verification_metrics",
+          "verification_command",
+          "comparison_chart",
+          "research_report"
+        ],
+        "missing_criteria": [],
+        "failures": [],
+        "next_focus": [],
+        "evidence": [
+          "dataset_generated: artifact=data/dataset.json",
+          "dataset_summary: artifact=artifacts/dataset_summary.json",
+          "baseline_metrics: artifact=artifacts/baseline_metrics.json",
+          "baseline_accuracy: accuracy=0.95",
+          "improved_metrics: artifact=artifacts/improved_metrics.json",
+          "improved_accuracy: accuracy=0.95",
+          "best_config: artifact=artifacts/best_config.json",
+          "improvement_delta: improvement_delta=0.1499999999999999",
+          "verification_metrics: artifact=artifacts/verification_metrics.json",
+          "verification_command: command=python verify_best.py --dataset data/dataset.json --config artifacts/best_config.json --output artifacts/verification_metrics.json --tolerance 0.000000001",
+          "verification_command: exit_code=0",
+          "comparison_chart: artifact=artifacts/comparison.png",
+          "research_report: artifact=artifacts/research_report.md"
+        ]
+      },
+      "failures": [],
+      "artifacts": [
+        "artifacts/verification_metrics.json",
+        "artifacts/comparison.png",
+        "artifacts/research_report.md"
+      ],
+      "started_at": "2026-08-12T05:29:35.296888+00:00",
+      "finished_at": "2026-08-12T05:29:35.451401+00:00",
+      "local_recovery_cycles": 0,
+      "executed_task_count": 2
+    }
+  ],
+  "pending_plan": null,
+  "last_evaluation": {
+    "completed": true,
+    "reason": "all deterministic contract acceptance gates passed",
+    "satisfied_criteria": [
+      "dataset_generated",
+      "dataset_summary",
+      "baseline_metrics",
+      "baseline_accuracy",
+      "improved_metrics",
+      "improved_accuracy",
+      "best_config",
+      "improvement_delta",
+      "verification_metrics",
+      "verification_command",
+      "comparison_chart",
+      "research_report"
+    ],
+    "missing_criteria": [],
+    "failures": [],
+    "next_focus": [],
+    "evidence": [
+      "dataset_generated: artifact=data/dataset.json",
+      "dataset_summary: artifact=artifacts/dataset_summary.json",
+      "baseline_metrics: artifact=artifacts/baseline_metrics.json",
+      "baseline_accuracy: accuracy=0.95",
+      "improved_metrics: artifact=artifacts/improved_metrics.json",
+      "improved_accuracy: accuracy=0.95",
+      "best_config: artifact=artifacts/best_config.json",
+      "improvement_delta: improvement_delta=0.1499999999999999",
+      "verification_metrics: artifact=artifacts/verification_metrics.json",
+      "verification_command: command=python verify_best.py --dataset data/dataset.json --config artifacts/best_config.json --output artifacts/verification_metrics.json --tolerance 0.000000001",
+      "verification_command: exit_code=0",
+      "comparison_chart: artifact=artifacts/comparison.png",
+      "research_report: artifact=artifacts/research_report.md"
+    ]
+  },
+  "last_error": null,
+  "created_at": "2026-08-12T05:29:34.950404+00:00",
+  "updated_at": "2026-08-12T05:29:35.455438+00:00"
+}

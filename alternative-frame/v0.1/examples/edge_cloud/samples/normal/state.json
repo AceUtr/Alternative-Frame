@@ -1,0 +1,8 @@
+{
+  "run_id": "sample-normal-v1",
+  "evidence_records": [
+    {"tool": "runtime_executor", "task_id": "preprocess", "node_type": "device", "success": true, "duration": 0.01, "fallback_count": 0},
+    {"tool": "runtime_executor", "task_id": "inference", "node_type": "edge", "success": true, "duration": 0.02, "fallback_count": 0},
+    {"tool": "runtime_executor", "task_id": "experiment", "node_type": "cloud", "success": true, "duration": 0.03, "fallback_count": 0}
+  ]
+}

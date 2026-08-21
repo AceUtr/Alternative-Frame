@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "run_id": "sample-cloud-edge-fallback-v1",
+  "nodes": [
+    {"node_id": "edge-1", "node_type": "edge", "online": true, "network_available": true, "capabilities": ["compute"], "estimated_latency_ms": 20, "estimated_cost": 0.2, "health": "healthy"},
+    {"node_id": "cloud-1", "node_type": "cloud", "online": false, "network_available": true, "capabilities": ["compute"], "estimated_latency_ms": 60, "estimated_cost": 1, "health": "offline"}
+  ],
+  "route_events": [
+    {"event": "node_execution_failed", "task_id": "experiment", "node_id": "cloud-1", "node_type": "cloud", "placement_reason": "matches preferred tier cloud", "duration": 0.01, "fallback_count": 0, "success": false, "failure_kind": "node_offline", "error": "node went offline", "time": "2026-01-01T00:00:00+00:00"},
+    {"event": "node_fallback_started", "task_id": "experiment", "node_id": "edge-1", "node_type": "edge", "placement_reason": "fallback candidate", "duration": 0.0, "fallback_count": 1, "success": null, "failure_kind": "", "error": "", "time": "2026-01-01T00:00:01+00:00"},
+    {"event": "node_execution_completed", "task_id": "experiment", "node_id": "edge-1", "node_type": "edge", "placement_reason": "fallback candidate", "duration": 0.02, "fallback_count": 1, "success": true, "failure_kind": "", "error": "", "time": "2026-01-01T00:00:02+00:00"}
+  ],
+  "metrics": {
+    "schema_version": "1.0",
+    "node_distribution": {"device": 0, "edge": 1, "cloud": 0, "unknown": 0},
+    "node_duration_seconds": {"device": 0.0, "edge": 0.02, "cloud": 0.01, "unknown": 0.0},
+    "node_failure_count": {"device": 0, "edge": 0, "cloud": 1, "unknown": 0},
+    "fallback_count": 1,
+    "execution_attempt_count": 2,
+    "no_eligible_node_count": 0
+  }
+}

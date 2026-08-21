@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 from validate_contribution import MANIFESTS, parse_args
@@ -42,3 +43,9 @@ def test_compact_limits_multiline_command_output():
     assert "\n" not in compact
     assert len(compact) == 30
     assert compact.endswith("...")
+
+
+def test_python_manifest_commands_use_the_running_interpreter():
+    command = ContributionValidator._resolve_command(["python", "-m", "pytest"])
+
+    assert command == [sys.executable, "-m", "pytest"]

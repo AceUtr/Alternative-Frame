@@ -110,6 +110,7 @@ def test_structured_replanner_requests_one_correction_after_validation_failure()
     assert events == [
         "replan_started",
         "replan_validation_failed",
+        "replan_retry_wait",
         "replan_started",
         "replan_completed",
     ]

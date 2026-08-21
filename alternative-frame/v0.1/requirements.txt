@@ -1,0 +1,3 @@
+# The competition runtime uses only the Python standard library.
+# Tkinter must be included in the Python installation (standard on python.org Windows builds).
+
