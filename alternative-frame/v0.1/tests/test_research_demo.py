@@ -553,6 +553,15 @@ def test_long_horizon_demo_rejects_phase_one_and_completes_phase_two(tmp_path):
     assert len(persisted["phases"]) == 2
 
 
+def test_research_metric_evidence_is_scoped_by_experiment(tmp_path):
+    workspace = _workspace(tmp_path)
+    report = run_demo(workspace, tmp_path / "runs", "research-metric-scope")
+    evidence = report.state.phases[-1].evaluation["evidence"]
+    assert any("baseline_accuracy=0.8" in item for item in evidence)
+    assert any("improved_accuracy=0.95" in item for item in evidence)
+    assert any("verification_accuracy=0.95" in item for item in evidence)
+
+
 def test_two_consecutive_demo_runs_do_not_reuse_previous_evidence(tmp_path):
     workspace = _workspace(tmp_path)
     runs = tmp_path / "runs"

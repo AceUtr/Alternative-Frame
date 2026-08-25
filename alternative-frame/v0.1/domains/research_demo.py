@@ -127,6 +127,12 @@ class ResearchExecutionAgent(Agent):
             result.error = f"missing expected outputs: {missing_outputs}"
         if result.success and expected_outputs:
             result.metadata["artifacts"] = expected_outputs
+        metric_aliases = task.metadata.get("metric_aliases", {})
+        metrics = result.metadata.get("metrics", {})
+        if isinstance(metric_aliases, dict) and isinstance(metrics, dict):
+            for source_name, scoped_name in metric_aliases.items():
+                if source_name in metrics and scoped_name:
+                    metrics[str(scoped_name)] = metrics[source_name]
         artifacts = list(result.metadata.get("artifacts", []))
         record = {
             "tool": result.tool,
@@ -255,7 +261,7 @@ class ResearchDomainAdapter(DomainAdapter):
                         {
                             "id": "baseline_accuracy",
                             "check_type": "metric",
-                            "metric_name": "accuracy",
+                            "metric_name": "baseline_accuracy",
                             "threshold": 0.8,
                             "mode": "max",
                         },
@@ -264,6 +270,7 @@ class ResearchDomainAdapter(DomainAdapter):
                         "baseline_metrics",
                         "baseline_accuracy",
                     ],
+                    "metric_aliases": {"accuracy": "baseline_accuracy"},
                     "execution": {
                         "tool": "experiment_runner",
                         "arguments": {"command": BASELINE_COMMAND},
@@ -288,12 +295,13 @@ class ResearchDomainAdapter(DomainAdapter):
                         {
                             "id": "improved_accuracy",
                             "check_type": "metric",
-                            "metric_name": "accuracy",
+                            "metric_name": "improved_accuracy",
                             "threshold": 0.9,
                             "mode": "max",
                         },
                     ],
                     "contract_criteria": ["improved_metrics", "improved_accuracy"],
+                    "metric_aliases": {"accuracy": "improved_accuracy"},
                     "execution": {
                         "tool": "experiment_runner",
                         "arguments": {"command": IMPROVED_COMMAND},
@@ -418,7 +426,7 @@ class ResearchDomainAdapter(DomainAdapter):
                     "baseline_accuracy",
                     "Baseline reaches the declared minimum accuracy",
                     "metric",
-                    metric_name="accuracy",
+                    metric_name="baseline_accuracy",
                     threshold=0.8,
                 ),
                 GoalCriterion(
@@ -431,7 +439,7 @@ class ResearchDomainAdapter(DomainAdapter):
                     "improved_accuracy",
                     "Improved experiment reaches the declared accuracy",
                     "metric",
-                    metric_name="accuracy",
+                    metric_name="improved_accuracy",
                     threshold=0.9,
                 ),
                 GoalCriterion(
@@ -452,6 +460,13 @@ class ResearchDomainAdapter(DomainAdapter):
                     "Best configuration is independently rerun",
                     "file_exists",
                     path="artifacts/verification_metrics.json",
+                ),
+                GoalCriterion(
+                    "verification_accuracy",
+                    "Independent verification reaches the selected accuracy",
+                    "metric",
+                    metric_name="verification_accuracy",
+                    threshold=0.9,
                 ),
                 GoalCriterion(
                     "verification_command",
@@ -502,7 +517,7 @@ class ResearchDomainAdapter(DomainAdapter):
                             {
                                 "id": "verification_accuracy",
                                 "check_type": "metric",
-                                "metric_name": "accuracy",
+                                "metric_name": "verification_accuracy",
                                 "threshold": 0.9,
                                 "mode": "max",
                             },
@@ -517,6 +532,7 @@ class ResearchDomainAdapter(DomainAdapter):
                             "verification_accuracy",
                             "verification_command",
                         ],
+                        "metric_aliases": {"accuracy": "verification_accuracy"},
                         "execution": {
                             "tool": "experiment_runner",
                             "arguments": {"command": VERIFICATION_COMMAND},

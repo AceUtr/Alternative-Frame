@@ -1353,6 +1353,7 @@ class FreshUI(tk.Tk):
                     on_task_event=on_research_task_event,
                     on_long_event=on_research_long_event,
                     on_global_event=on_research_global_event,
+                    on_preflight=lambda value: self.events.put(("preflight_report", value)),
                     on_controller_ready=lambda controller: setattr(self, "active_controller", controller),
                     contract_override=contract,
                 )
