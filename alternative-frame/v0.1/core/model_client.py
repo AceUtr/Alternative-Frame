@@ -129,6 +129,12 @@ class OpenAICompatibleClient:
         message = dict(message)
         message["content"] = self._normalize_content(message)
         message["_finish_reason"] = choice.get("finish_reason")
+        # Preserve provider usage telemetry for the metrics layer.  Some
+        # OpenAI-compatible gateways omit this field; missing usage remains
+        # unknown instead of being inferred from max_tokens.
+        usage = data.get("usage")
+        if isinstance(usage, dict):
+            message["_usage"] = dict(usage)
         return message
 
     @staticmethod

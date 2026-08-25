@@ -35,12 +35,21 @@ class ConfiguredModelAgent(Agent):
         try:
             message = self.client.chat(messages)
             content = message.get("content", "") if isinstance(message, dict) else str(message)
+            usage = message.get("_usage") if isinstance(message, dict) else None
+            tool_records = []
+            if isinstance(usage, dict):
+                tool_records.append({
+                    "tool": "model",
+                    "success": True,
+                    "metadata": {"usage": dict(usage)},
+                })
             return AgentResult(
                 subtask_id=task.id,
                 status="success",
                 summary=content,
                 evidence=[f"model={self.client.config.model}", "api_response_received"],
                 artifacts=[],
+                tool_records=tool_records,
                 started_at=started,
                 finished_at=utc_now(),
             )

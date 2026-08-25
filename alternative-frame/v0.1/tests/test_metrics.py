@@ -193,3 +193,23 @@ def test_explicit_pricing_calculates_cost_and_missing_pricing_is_unknown():
     unknown = metrics_from_report(report, "research", "real", "model-x", 0.0, "unknown")
     assert priced.estimated_cost == 0.004
     assert unknown.estimated_cost is None
+
+
+def test_model_usage_record_is_aggregated():
+    report = SimpleNamespace(
+        status="success", rounds=1, local_recovery_cycles=0,
+        results={"t1": AgentResult(
+            "t1", "success", evidence=["api_response_received"],
+            tool_records=[{"tool": "model", "success": True,
+                           "metadata": {"usage": {
+                               "prompt_tokens": 120,
+                               "completion_tokens": 30,
+                               "total_tokens": 150,
+                           }}}],
+        )},
+    )
+    metrics = metrics_from_report(report, "research", "real", "deepseek-chat", 0.0, "usage-run")
+    assert metrics.model_calls == 1
+    assert metrics.prompt_tokens == 120
+    assert metrics.completion_tokens == 30
+    assert metrics.total_tokens == 150

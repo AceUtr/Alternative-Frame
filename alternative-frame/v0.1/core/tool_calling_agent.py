@@ -75,6 +75,16 @@ class ToolCallingAgent(Agent):
         call_counts = {}
         for step in range(self.max_steps):
             response = self.client.chat(messages, tools=self.tools.schemas())
+            usage = response.get("_usage") if isinstance(response, dict) else None
+            model_record = None
+            if isinstance(usage, dict):
+                model_record = {
+                    "tool": "model",
+                    "success": True,
+                    "metadata": {"usage": dict(usage)},
+                    "step": step + 1,
+                }
+                tool_records.append(model_record)
             tool_calls = response.get("tool_calls", []) if isinstance(response, dict) else []
             if not tool_calls:
                 content = response.get("content", "") if isinstance(response, dict) else str(response)

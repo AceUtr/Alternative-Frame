@@ -752,6 +752,8 @@ class FreshUI(tk.Tk):
         self.task_items: Dict[str, str] = {}
         self.dag_nodes = {}
         self.current_dag_tasks = []
+        self.phase_snapshots = {}
+        self.selected_phase = tk.StringVar(value="暂无阶段")
         self._style()
         self._layout()
         self.after(100, self._drain)
@@ -957,6 +959,18 @@ class FreshUI(tk.Tk):
         inner = tk.Frame(card, bg=COLORS["card"], padx=14, pady=12)
         inner.pack(fill=tk.BOTH, expand=True)
         ttk.Label(inner, text="03  子任务与角色", style="CardTitle.TLabel").pack(anchor=tk.W, pady=(0, 8))
+        phase_bar = tk.Frame(inner, bg=COLORS["card"])
+        phase_bar.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            phase_bar, text="阶段历史", bg=COLORS["card"], fg=COLORS["muted"],
+            font=("Microsoft YaHei UI", 9),
+        ).pack(side=tk.LEFT)
+        self.phase_box = ttk.Combobox(
+            phase_bar, textvariable=self.selected_phase, state="readonly", width=26,
+            values=["暂无阶段"],
+        )
+        self.phase_box.pack(side=tk.LEFT, padx=(8, 0))
+        self.phase_box.bind("<<ComboboxSelected>>", self._select_phase_snapshot)
         self.dag_tabs = ttk.Notebook(inner)
         self.dag_tabs.pack(fill=tk.BOTH, expand=True)
         table_tab = tk.Frame(self.dag_tabs, bg=COLORS["card"])
@@ -1088,6 +1102,59 @@ class FreshUI(tk.Tk):
         height = max(y for _, y in positions.values()) + node_h + 24
         self.dag_canvas.configure(scrollregion=(0, 0, width, height))
 
+    def _save_phase_snapshot(self, phase, tasks, plan_goal="", recovery=False):
+        """Keep immutable UI data for each planned phase; later phases must not erase history."""
+        phase = int(phase)
+        self.phase_snapshots[phase] = {
+            "phase": phase,
+            "plan_goal": plan_goal,
+            "tasks": [dict(task) for task in (tasks or [])],
+            "recovery": bool(recovery),
+        }
+        values = [
+            f"阶段 {item}: {self.phase_snapshots[item].get('plan_goal', '')[:34]}"
+            for item in sorted(self.phase_snapshots)
+        ]
+        self.phase_box.configure(values=values)
+        self.selected_phase.set(values[-1])
+
+    def _select_phase_snapshot(self, _event=None):
+        selected = self.selected_phase.get()
+        if selected == "暂无阶段":
+            return
+        try:
+            phase = int(selected.split()[1].rstrip(":"))
+        except (IndexError, ValueError):
+            return
+        snapshot = self.phase_snapshots.get(phase)
+        if not snapshot:
+            return
+        self._display_phase_snapshot(snapshot)
+
+    def _display_phase_snapshot(self, snapshot):
+        tasks = snapshot.get("tasks", [])
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.task_items.clear()
+        for task in tasks:
+            task_id = task.get("id", "unknown")
+            item = self.tree.insert(
+                "", tk.END,
+                values=(
+                    task_id,
+                    task.get("role", "unknown"),
+                    ", ".join(task.get("depends_on", [])) or "—",
+                    "历史快照",
+                    "—",
+                ),
+            )
+            self.task_items[task_id] = item
+        self._render_dag(tasks, recovery=snapshot.get("recovery", False))
+        self.append_log(
+            f"VIEW → 已切换到阶段 {snapshot.get('phase', '?')} DAG · "
+            f"tasks={len(tasks)} · 历史只读快照"
+        )
+
     def _set_dag_status(self, task_id, status):
         node = self.dag_nodes.get(task_id)
         if not node:
@@ -1189,6 +1256,9 @@ class FreshUI(tk.Tk):
         self._render_evidence([])
         self._render_preflight(None)
         self.task_items.clear()
+        self.phase_snapshots.clear()
+        self.phase_box.configure(values=["暂无阶段"])
+        self.selected_phase.set("暂无阶段")
         self._set_state("运行中", COLORS["blue_dark"])
         self.append_log(f"MainAgent ← {goal}")
         execution_mode = self.execution_mode.get()
@@ -1698,6 +1768,12 @@ class FreshUI(tk.Tk):
             self.append_log("LONG → 长程控制器已启动")
         elif event == "phase_planned":
             phase = detail.get("phase", "?")
+            self._save_phase_snapshot(
+                phase,
+                detail.get("tasks", []),
+                detail.get("plan_goal", ""),
+                recovery=False,
+            )
             for item in self.tree.get_children():
                 self.tree.delete(item)
             self.task_items.clear()
