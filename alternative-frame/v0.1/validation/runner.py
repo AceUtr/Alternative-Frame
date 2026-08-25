@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import time
+import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -158,7 +159,9 @@ class ContributionValidator:
             if not isinstance(adapter_type, type) or not issubclass(adapter_type, DomainAdapter):
                 raise TypeError(f"{spec['class']} must subclass DomainAdapter")
             adapter = adapter_type()
-            workspace = self.root / ".validation_tmp" / manifest["id"] / "workspace"
+            # Isolate every preflight from stale or locked artifacts left by a
+            # previous run, which is important on Windows and CI workers.
+            workspace = Path(tempfile.mkdtemp(prefix=f"alternative-frame-{manifest['id']}-"))
             adapter.reset_workspace(workspace)
             tools, agents = adapter.configure(workspace, model_client=None)
             goal = manifest.get("validation_goal", f"validate {manifest['id']} contribution")

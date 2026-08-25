@@ -1,214 +1,71 @@
-from core.main_agent import MainAgent
-from core.agents import AgentRegistry, DeterministicAgent
+from __future__ import annotations
+
+import argparse
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+from core.domains import DomainRegistry
+from core.long_horizon import DeterministicGlobalEvaluator, LongHorizonController, LongHorizonStore
 from core.orchestrator import Orchestrator
-from domains.software_demo import build
-
-import os
-import subprocess
-
-
-
-def software_handler(task, context):
-
-    print("\n[Agent executing]")
-    print("Role:", task.role)
-    print("Task:", task.description)
-
-
-    project = "examples/software_task"
-
-    app_file = f"{project}/app.py"
-
-
-
-    # =====================
-    # Analyst
-    # =====================
-
-    if task.role == "analyst":
-
-
-        if not os.path.exists(app_file):
-
-            return "app.py not found"
-
-
-        with open(
-            app_file,
-            "r",
-            encoding="utf8"
-        ) as f:
-
-            code = f.read()
-
-
-        print("\nCurrent Code:")
-        print(code)
-
-
-        if "-" in code:
-
-            return "Found bug: add function uses subtraction"
-
-
-        return "No obvious bug"
-
-
-
-    # =====================
-    # Developer
-    # =====================
-
-    elif task.role == "developer":
-
-
-        with open(
-            app_file,
-            "w",
-            encoding="utf8"
-        ) as f:
-
-
-            f.write(
-"""
-def add(a,b):
-    return a+b
-"""
-            )
-
-
-        print(
-            "Developer fixed app.py"
-        )
-
-
-        return "Code modification completed"
-
-
-
-    # =====================
-    # Tester
-    # =====================
-
-    elif task.role == "tester":
-
-
-        print("Running tests...")
-
-
-        test_file = f"{project}/test_app.py"
-
-
-        result = subprocess.run(
-            [
-                "pytest",
-                test_file,
-                "-v"
-            ],
-            capture_output=True,
-            text=True
-        )
-
-
-        print("\nPytest output:")
-        print(result.stdout)
-
-
-
-        if result.returncode == 0:
-
-            return "All tests passed"
-
-
-        else:
-
-            return "Tests failed"
-
-
-
-    return "Finished"
-
-
-
-def main():
-
-
-
-    registry = AgentRegistry()
-
-
-
-    registry.register(
-        DeterministicAgent(
-            role="analyst",
-            handler=software_handler
-        )
+from core.preflight import HarnessPreflightChecker
+from domains.software_demo import DEFAULT_GOAL, SoftwareDomainAdapter
+
+
+ROOT = Path(__file__).resolve().parent
+
+
+def run_demo(*, workspace: str | Path | None = None, runs_dir: str | Path | None = None,
+             run_id: str | None = None, reset: bool = True, on_event=None):
+    chosen_id = run_id or f"software-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
+    runs_path = Path(runs_dir).resolve() if runs_dir else Path(
+        tempfile.mkdtemp(prefix="alternative-frame-software-runs-")
+    ).resolve()
+    workspace_path = Path(workspace).resolve() if workspace else Path(
+        tempfile.mkdtemp(prefix=f"alternative-frame-software-{chosen_id}-")
+    ).resolve()
+    adapter = SoftwareDomainAdapter()
+    if reset:
+        adapter.reset_workspace(workspace_path)
+    tools, agents = adapter.configure(workspace_path)
+    initial_plan = adapter.build_plan(DEFAULT_GOAL)
+    contract = adapter.build_contract(DEFAULT_GOAL)
+    HarnessPreflightChecker().check(
+        domains=DomainRegistry([adapter]), domain=adapter.name, plan=initial_plan,
+        agents=agents, tools=tools, workspace=workspace_path, contract=contract,
+    ).require_ready()
+
+    store = LongHorizonStore(runs_path)
+
+    def evaluator_event(event, payload):
+        store.append_event(chosen_id, event, payload)
+        if on_event:
+            on_event(event, payload)
+
+    evaluator = DeterministicGlobalEvaluator(contract, workspace_path, on_event=evaluator_event)
+    controller = LongHorizonController(
+        Orchestrator(agents), lambda _state: initial_plan, store,
+        evaluator=evaluator,
+        replanner=lambda _state, evaluation: adapter.build_recovery_plan(DEFAULT_GOAL, evaluation.missing_criteria),
+        max_phases=2, max_total_tasks=8, acceptance_contract=contract.to_dict(), on_event=on_event,
     )
+    return controller.run(DEFAULT_GOAL, run_id=chosen_id)
 
 
-    registry.register(
-        DeterministicAgent(
-            role="developer",
-            handler=software_handler
-        )
-    )
-
-
-    registry.register(
-        DeterministicAgent(
-            role="tester",
-            handler=software_handler
-        )
-    )
-
-
-
-    orchestrator = Orchestrator(
-        registry=registry
-    )
-
-
-
-    agent = MainAgent(
-        orchestrator,
-        planner=build
-    )
-
-
-
-    goal = """
-    Analyze software project,
-    locate bugs,
-    modify source code,
-    run regression tests.
-    """
-
-
-
-    report = agent.execute(goal)
-
-
-
-    print("\n========== REPORT ==========")
-
-
-    print(
-        "Status:",
-        report.status
-    )
-
-
-
-    for task_id,result in report.results.items():
-
-        print(
-            task_id,
-            ":",
-            result.summary
-        )
-
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run the deterministic two-phase software Demo")
+    parser.add_argument("--workspace", type=Path)
+    parser.add_argument("--runs-dir", type=Path)
+    parser.add_argument("--run-id")
+    args = parser.parse_args()
+    report = run_demo(workspace=args.workspace, runs_dir=args.runs_dir, run_id=args.run_id)
+    print(f"status={report.status}")
+    print(f"run_id={report.state.run_id}")
+    print(f"phases={report.state.phase}")
+    print(f"tasks={report.state.total_tasks}")
+    print(f"artifacts={','.join(report.state.artifacts)}")
+    return 0 if report.status == "completed" else 1
 
 
 if __name__ == "__main__":
-
-    main()
+    raise SystemExit(main())

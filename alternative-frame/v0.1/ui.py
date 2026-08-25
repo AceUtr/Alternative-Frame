@@ -8,7 +8,7 @@ import queue
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from typing import Dict
 
 from core.agents import AgentRegistry, DeterministicAgent
@@ -60,6 +60,7 @@ COLORS = {
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
+RUNTIME_VIEW_SCHEMA_VERSION = "1.0"
 TOOL_TEST_WORKSPACE = PROJECT_DIR / "tool_test_workspace"
 RESEARCH_EXECUTION_MODE = "Research Demo (offline)"
 DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务", RESEARCH_EXECUTION_MODE)
@@ -68,6 +69,42 @@ DEVELOPER_EXECUTION_MODES = ("工具调用自检", "失败修复自检")
 
 def long_horizon_runs_root() -> Path:
     return Path(os.getenv("LONG_HORIZON_RUNS_DIR", str(PROJECT_DIR / "runs" / "long_horizon")))
+
+
+def validate_runtime_view(payload):
+    """Validate the stable edge-cloud UI contract without runtime imports."""
+    if not isinstance(payload, dict):
+        raise ValueError("runtime_view.json must contain a JSON object")
+    if payload.get("schema_version") != RUNTIME_VIEW_SCHEMA_VERSION:
+        raise ValueError(
+            f"unsupported runtime view schema: {payload.get('schema_version')!r}"
+        )
+    for field in ("nodes", "route_events", "metrics"):
+        if field not in payload:
+            raise ValueError(f"runtime view is missing required field: {field}")
+    if not isinstance(payload["nodes"], list) or not isinstance(payload["route_events"], list):
+        raise ValueError("runtime view nodes and route_events must be arrays")
+    if not isinstance(payload["metrics"], dict):
+        raise ValueError("runtime view metrics must be an object")
+    required_metrics = {
+        "node_distribution", "node_duration_seconds", "node_failure_count",
+        "fallback_count", "execution_attempt_count", "no_eligible_node_count",
+    }
+    missing = sorted(required_metrics - set(payload["metrics"]))
+    if missing:
+        raise ValueError("runtime view metrics are missing: " + ", ".join(missing))
+    return payload
+
+
+def load_runtime_view(path):
+    path = Path(path).resolve()
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    return validate_runtime_view(payload)
+
+
+def latest_runtime_view(project_dir=PROJECT_DIR):
+    candidates = list((Path(project_dir) / "runs").glob("**/runtime_view.json"))
+    return max(candidates, key=lambda item: item.stat().st_mtime) if candidates else None
 
 
 def build_registry(client=None, workspace=None, on_tool_event=None, tool_test: bool = False) -> AgentRegistry:
@@ -421,6 +458,103 @@ class ContractPreviewDialog(tk.Toplevel):
         self.destroy()
 
 
+class RuntimeViewDialog(tk.Toplevel):
+    """Read-only edge-cloud node, route, and metric visualization."""
+
+    def __init__(self, parent, payload, source_path):
+        super().__init__(parent)
+        self.title("端边云运行视图")
+        self.geometry("1040x700")
+        self.minsize(820, 560)
+        self.transient(parent)
+        self.configure(bg=COLORS["bg"])
+
+        root = tk.Frame(self, bg=COLORS["bg"], padx=18, pady=16)
+        root.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(root, text="端边云运行视图", style="Hero.TLabel").pack(anchor=tk.W)
+        run_id = payload.get("run_id") or "unknown"
+        tk.Label(
+            root,
+            text=f"run_id: {run_id}    schema: {payload['schema_version']}    source: {source_path}",
+            bg=COLORS["bg"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9),
+            anchor=tk.W,
+        ).pack(fill=tk.X, pady=(2, 10))
+
+        tabs = ttk.Notebook(root)
+        tabs.pack(fill=tk.BOTH, expand=True)
+        nodes_tab = tk.Frame(tabs, bg=COLORS["card"], padx=10, pady=10)
+        routes_tab = tk.Frame(tabs, bg=COLORS["card"], padx=10, pady=10)
+        metrics_tab = tk.Frame(tabs, bg=COLORS["card"], padx=10, pady=10)
+        tabs.add(nodes_tab, text="节点")
+        tabs.add(routes_tab, text="路由时间线")
+        tabs.add(metrics_tab, text="指标")
+
+        node_columns = ("id", "type", "health", "network", "latency", "cost", "capabilities")
+        node_tree = ttk.Treeview(nodes_tab, columns=node_columns, show="headings", height=14)
+        for key, title, width in [
+            ("id", "节点 ID", 140), ("type", "类型", 70), ("health", "健康状态", 110),
+            ("network", "网络", 75), ("latency", "估算时延(ms)", 105),
+            ("cost", "估算成本", 85), ("capabilities", "能力", 310),
+        ]:
+            node_tree.heading(key, text=title)
+            node_tree.column(key, width=width, anchor=tk.W)
+        node_tree.pack(fill=tk.BOTH, expand=True)
+        for node in payload["nodes"]:
+            node_tree.insert("", tk.END, values=(
+                node.get("node_id", "unknown"), node.get("node_type", "unknown"),
+                node.get("health", "unknown"),
+                "可用" if node.get("network_available") is True else "不可用",
+                node.get("estimated_latency_ms", "unknown"), node.get("estimated_cost", "unknown"),
+                ", ".join(node.get("capabilities", [])),
+            ))
+
+        route_columns = ("time", "event", "task", "node", "success", "fallback", "reason")
+        route_tree = ttk.Treeview(routes_tab, columns=route_columns, show="headings", height=14)
+        for key, title, width in [
+            ("time", "时间", 145), ("event", "事件", 155), ("task", "任务", 175),
+            ("node", "节点", 110), ("success", "结果", 65), ("fallback", "回退", 55),
+            ("reason", "选择理由 / 错误", 330),
+        ]:
+            route_tree.heading(key, text=title)
+            route_tree.column(key, width=width, anchor=tk.W)
+        route_tree.tag_configure("failed", foreground=COLORS["danger"])
+        route_tree.tag_configure("passed", foreground=COLORS["success"])
+        route_tree.pack(fill=tk.BOTH, expand=True)
+        for event in payload["route_events"]:
+            success = event.get("success")
+            result = "成功" if success is True else "失败" if success is False else "-"
+            reason = event.get("error") or event.get("placement_reason") or ""
+            route_tree.insert("", tk.END, values=(
+                str(event.get("time", "")).replace("T", " ")[:23], event.get("event", ""),
+                event.get("task_id", ""),
+                f"{event.get('node_type') or '-'} / {event.get('node_id') or '-'}",
+                result, event.get("fallback_count", 0), reason,
+            ), tags=("passed" if success is True else "failed" if success is False else "",))
+
+        metric_columns = ("metric", "device", "edge", "cloud", "unknown", "value")
+        metric_tree = ttk.Treeview(metrics_tab, columns=metric_columns, show="headings", height=14)
+        for key, title, width in [
+            ("metric", "指标", 220), ("device", "device", 90), ("edge", "edge", 90),
+            ("cloud", "cloud", 90), ("unknown", "unknown", 90), ("value", "总值", 130),
+        ]:
+            metric_tree.heading(key, text=title)
+            metric_tree.column(key, width=width, anchor=tk.W)
+        metric_tree.pack(fill=tk.BOTH, expand=True)
+        metrics = payload["metrics"]
+        for key in ("node_distribution", "node_duration_seconds", "node_failure_count"):
+            values = metrics.get(key, {})
+            metric_tree.insert("", tk.END, values=(
+                key, values.get("device", 0), values.get("edge", 0),
+                values.get("cloud", 0), values.get("unknown", 0), "",
+            ))
+        for key in ("fallback_count", "execution_attempt_count", "no_eligible_node_count"):
+            metric_tree.insert("", tk.END, values=(key, "", "", "", "", metrics.get(key, "unknown")))
+
+        buttons = tk.Frame(root, bg=COLORS["bg"])
+        buttons.pack(fill=tk.X, pady=(10, 0))
+        ttk.Button(buttons, text="关闭", style="Soft.TButton", command=self.destroy).pack(side=tk.RIGHT)
+
+
 class RunHistoryDialog(tk.Toplevel):
     def __init__(self, parent, store, on_resume):
         super().__init__(parent)
@@ -594,6 +728,7 @@ class FreshUI(tk.Tk):
         self.pause_btn = ttk.Button(actions, text="暂停", style="Soft.TButton", command=self.pause_run, state=tk.DISABLED)
         self.pause_btn.pack(side=tk.RIGHT, padx=(0, 8))
         ttk.Button(actions, text="运行历史", style="Soft.TButton", command=self.show_run_history).pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(actions, text="端边云视图", style="Soft.TButton", command=self.show_runtime_view).pack(side=tk.RIGHT, padx=(0, 8))
 
     def _toggle_developer_modes(self):
         values = DEFAULT_EXECUTION_MODES + DEVELOPER_EXECUTION_MODES if self.developer_mode.get() else DEFAULT_EXECUTION_MODES
@@ -900,6 +1035,24 @@ class FreshUI(tk.Tk):
 
     def show_run_history(self):
         RunHistoryDialog(self, LongHorizonStore(long_horizon_runs_root()), self.resume_run)
+
+    def show_runtime_view(self):
+        path = latest_runtime_view()
+        if path is None:
+            selected = filedialog.askopenfilename(
+                parent=self,
+                title="选择端边云 runtime_view.json",
+                filetypes=[("Runtime view", "runtime_view.json"), ("JSON", "*.json")],
+            )
+            if not selected:
+                return
+            path = Path(selected)
+        try:
+            payload = load_runtime_view(path)
+        except Exception as exc:
+            messagebox.showerror("端边云数据无效", str(exc), parent=self)
+            return
+        RuntimeViewDialog(self, payload, path)
 
     def resume_run(self, state):
         if self.running:
