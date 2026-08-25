@@ -1333,36 +1333,28 @@ class FreshUI(tk.Tk):
                     return
                 ContractValidator().validate(contract, expected_goal=RESEARCH_GOAL)
 
-                def on_research_event(kind, payload):
-                    if kind == "task_event":
-                        self.events.put((
-                            "task_event",
-                            (
-                                payload["event"],
-                                payload["task_id"],
-                                payload.get("result"),
-                                payload.get("attempt"),
-                            ),
-                        ))
-                    elif kind == "long_horizon_event":
-                        self.events.put((
-                            "long_horizon_event",
-                            (payload["event"], payload["payload"]),
-                        ))
-                    elif kind == "global_evaluator_event":
-                        self.events.put((
-                            "global_evaluator_event",
-                            (payload["event"], payload["payload"]),
-                        ))
+                def on_research_task_event(event, task, result=None):
+                    self.events.put((
+                        "task_event",
+                        (event, task.id, result, task.metadata.get("runtime_attempt")),
+                    ))
+
+                def on_research_long_event(event, payload):
+                    self.events.put(("long_horizon_event", (event, payload)))
+
+                def on_research_global_event(event, payload):
+                    self.events.put(("global_evaluator_event", (event, payload)))
 
                 report = run_research_demo(
                     PROJECT_DIR / "examples" / "research_task",
                     runs_root,
                     run_id,
                     fault_scenario=self.research_fault_scenario.get(),
-                    on_event=on_research_event,
-                    on_controller=lambda controller: setattr(self, "active_controller", controller),
-                    acceptance_contract=contract,
+                    on_task_event=on_research_task_event,
+                    on_long_event=on_research_long_event,
+                    on_global_event=on_research_global_event,
+                    on_controller_ready=lambda controller: setattr(self, "active_controller", controller),
+                    contract_override=contract,
                 )
                 store = LongHorizonStore(runs_root)
                 self.events.put((
