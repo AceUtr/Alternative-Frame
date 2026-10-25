@@ -6,6 +6,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 from core.acceptance import AcceptanceEvaluator
 from core.domains import DomainRegistry
 from core.local_recovery import LocalDAGRecoveryController
@@ -14,6 +16,7 @@ from core.models import AgentResult, SubTask
 from core.orchestrator import Orchestrator
 from core.preflight import HarnessPreflightChecker
 from domains.software_demo import PYTEST_COMMAND, SoftwareDomainAdapter
+from validation.software_smoke import _assert_common_success
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -128,12 +131,30 @@ def test_cli_default_scenario_runs_real_demo_and_writes_evidence(tmp_path):
     assert state["failed_tasks"] == []
     assert state["last_evaluation"]["completed"] is True
     assert (runtime_root / "events.jsonl").is_file()
+    manifest = json.loads((runtime_root / "run_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["run_id"] == runtime_root.name
+    assert manifest["scenario"] == "none"
+    assert manifest["status"] == "completed"
+    assert manifest["test_command"] == PYTEST_COMMAND
+    assert manifest["test_exit_code"] == 0
+    assert manifest["process_exit_code"] == 0
     assert (runtime_root / "workspace/artifacts/software_report.md").is_file()
     assert (runtime_root / "workspace/artifacts/code_diff.patch").is_file()
     assert (runtime_root / "workspace/artifacts/test_log.txt").is_file()
     assert PYTEST_COMMAND in (
         runtime_root / "workspace/artifacts/software_report.md"
     ).read_text(encoding="utf-8")
+    manifest_path = runtime_root / "run_manifest.json"
+    manifest["scenario"] = "retry-once"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(AssertionError, match="scenario"):
+        _assert_common_success(output, runtime_root, "none")
+
+    manifest["scenario"] = "none"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    manifest_path.unlink()
+    with pytest.raises(AssertionError, match="run_manifest"):
+        _assert_common_success(output, runtime_root, "none")
 
 
 def test_cli_rejects_unsupported_fault_scenario(tmp_path):

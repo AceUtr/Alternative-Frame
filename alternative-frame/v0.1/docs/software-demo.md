@@ -12,6 +12,7 @@ so the flow is deterministic, offline, and fast enough for live presentation.
 - Fixture paths: `examples/software_task/app.py` and `examples/software_task/test_app.py`
 - Runtime workspace: a temporary directory under the OS temp folder by default.
 - Runtime artifacts: `<runtime-root>/workspace/artifacts/`
+- Run manifest: `<runtime-root>/run_manifest.json`
 - Long-horizon state: `<runtime-root>/state.json`
 - Event log: `<runtime-root>/events.jsonl`
 
@@ -143,6 +144,7 @@ runtime artifacts.
 
 Each successful run creates:
 
+- `<runtime-root>/run_manifest.json`
 - `<runtime-root>/state.json`
 - `<runtime-root>/events.jsonl`
 - `<runtime-root>/workspace/artifacts/requirement_analysis.md`
@@ -154,6 +156,12 @@ Each successful run creates:
 
 These artifacts are written inside the temporary runtime workspace, not to the
 tracked fixture directory.
+
+`run_manifest.json` is the machine-readable handoff record for evaluation. It
+binds the `run_id`, scenario, final status, exact test command, test exit code,
+process exit code, state/event files, and required artifacts to one runtime
+directory. The smoke validator checks the manifest against `state.json` and the
+files it lists.
 
 The demo succeeds only when required files and command evidence have current-run
 provenance. Stale files and Agent prose are rejected by the acceptance and
