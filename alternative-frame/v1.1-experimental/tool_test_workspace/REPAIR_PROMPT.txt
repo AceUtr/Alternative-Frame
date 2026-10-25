@@ -1,0 +1,14 @@
+This is a software engineering failure-repair tool-call test.
+
+The tool workspace is already restricted to tool_test_workspace. Use paths relative to that workspace.
+
+You must use the available tools to complete this task:
+1. Read requirements.txt, hello.py, and test_hello.py.
+2. Run the existing test first, before changing any file, with:
+   python -m unittest -v test_hello.py
+3. The initial test is expected to fail. Inspect the real failure output.
+4. Fix only the implementation defect in hello.py. Do not weaken, delete, or bypass the test.
+5. Run the same test command again.
+6. Only finish after the second real test run exits with code 0.
+
+In the final response, report the initial failure, changed file, exact test command, and final passing result.

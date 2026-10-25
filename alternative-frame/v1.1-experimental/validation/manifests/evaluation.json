@@ -1,0 +1,31 @@
+{
+  "id": "evaluation",
+  "required_files": [
+    "core/metrics.py",
+    "run_benchmarks.py",
+    "benchmarks/configs/smoke.json",
+    "tests/test_metrics.py",
+    "tests/test_benchmark_runner.py",
+    "docs/evaluation.md",
+    "docs/demo-script.md"
+  ],
+  "import_modules": [
+    "core.metrics"
+  ],
+  "required_symbols": {
+    "core.metrics": ["RunMetrics", "MetricsRecorder"]
+  },
+  "test_commands": [
+    ["python", "-m", "pytest", "tests/test_metrics.py", "tests/test_benchmark_runner.py", "-q", "-p", "no:cacheprovider"]
+  ],
+  "smoke_command": ["python", "run_benchmarks.py", "--config", "benchmarks/configs/smoke.json"],
+  "scan_paths": [
+    "core/metrics.py",
+    "run_benchmarks.py",
+    "benchmarks",
+    "tests/test_metrics.py",
+    "tests/test_benchmark_runner.py",
+    "docs/evaluation.md",
+    "docs/demo-script.md"
+  ]
+}
