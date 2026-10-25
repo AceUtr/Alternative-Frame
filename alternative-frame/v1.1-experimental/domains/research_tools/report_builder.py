@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from core.tools import Tool, ToolResult
+from .discovery_tool import discovery_report
 
 
 class ResearchReportBuilder(Tool):
@@ -109,6 +110,7 @@ class ResearchReportBuilder(Tool):
                 f"{rows}\n\n"
                 "![Metric comparison](comparison.png)\n"
             )
+            report += discovery_report(self.workspace)
             chart_path.parent.mkdir(parents=True, exist_ok=True)
             report_path.parent.mkdir(parents=True, exist_ok=True)
             report_path.write_text(report, encoding="utf-8")
