@@ -37,3 +37,5 @@ alternative-frame/v0.1/tests/test_word_counter.py
 # Long-horizon runtime state (keep the directory, not individual runs)
 alternative-frame/v0.1/runs/long_horizon/*
 !alternative-frame/v0.1/runs/long_horizon/.gitkeep
+alternative-frame/v1.1-experimental/reports/
+alternative-frame/v1.1-experimental/runs/
