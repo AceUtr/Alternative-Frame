@@ -28,6 +28,7 @@ REQUIRED_ARTIFACTS = (
     "workspace/artifacts/code_diff.patch",
     "workspace/artifacts/test_log.txt",
 )
+MANIFEST_NAME = "run_manifest.json"
 
 
 def _new_run_id(scenario: str) -> str:
@@ -163,6 +164,52 @@ def _validate_common_artifacts(runtime_root: Path) -> list[str]:
     return failures
 
 
+def _find_test_evidence(state: dict[str, Any]) -> dict[str, Any] | None:
+    matches = []
+    for record in state.get("evidence_records", []):
+        if record.get("tool") != "test_runner":
+            continue
+        arguments = record.get("arguments")
+        if not isinstance(arguments, dict):
+            continue
+        if arguments.get("command") != "python -m pytest test_app.py -q -p no:cacheprovider":
+            continue
+        matches.append(record)
+    return matches[-1] if matches else None
+
+
+def _write_run_manifest(
+    runtime_root: Path,
+    scenario: str,
+    run_id: str,
+    state: dict[str, Any],
+    process_exit_code: int,
+) -> Path:
+    test_evidence = _find_test_evidence(state)
+    test_arguments = test_evidence.get("arguments", {}) if test_evidence else {}
+    manifest = {
+        "run_id": run_id,
+        "scenario": scenario,
+        "goal": GOAL,
+        "status": state.get("status"),
+        "phase_count": state.get("phase", 0),
+        "test_command": test_arguments.get(
+            "command", "python -m pytest test_app.py -q -p no:cacheprovider"
+        ),
+        "test_exit_code": test_evidence.get("exit_code") if test_evidence else None,
+        "process_exit_code": process_exit_code,
+        "state_file": "state.json",
+        "events_file": "events.jsonl",
+        "artifacts": list(REQUIRED_ARTIFACTS),
+    }
+    path = runtime_root / MANIFEST_NAME
+    path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _build_controller(scenario: str, runtime_base: Path, run_id: str):
     adapter = SoftwareDomainAdapter()
     runtime_root = runtime_base / run_id
@@ -253,6 +300,15 @@ def run_demo(scenario: str, state_dir: str | None = None) -> int:
                 failures.append("local recovery event has no frozen nodes")
             if not recovery.get("impacted"):
                 failures.append("local recovery event has no impacted nodes")
+
+    process_exit_code = 1 if failures else 0
+    _write_run_manifest(
+        runtime_root,
+        scenario,
+        run_id,
+        state,
+        process_exit_code,
+    )
 
     if failures:
         for failure in failures:

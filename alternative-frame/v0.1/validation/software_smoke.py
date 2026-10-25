@@ -16,6 +16,7 @@ REQUIRED_ARTIFACTS = (
     "workspace/artifacts/code_diff.patch",
     "workspace/artifacts/test_log.txt",
 )
+MANIFEST_NAME = "run_manifest.json"
 
 
 def _project_root() -> Path:
@@ -42,7 +43,11 @@ def _runtime_root_from_output(output: str) -> Path:
     return Path(match.group(1).strip())
 
 
-def _assert_common_success(output: str, runtime_root: Path) -> dict[str, Any]:
+def _assert_common_success(
+    output: str,
+    runtime_root: Path,
+    expected_scenario: str,
+) -> dict[str, Any]:
     if "Status: completed" not in output:
         raise AssertionError("smoke output does not contain Status: completed")
     phase_match = re.search(r"^Phase count:\s*(\d+)$", output, re.MULTILINE)
@@ -53,10 +58,13 @@ def _assert_common_success(output: str, runtime_root: Path) -> dict[str, Any]:
 
     state_path = runtime_root / "state.json"
     events_path = runtime_root / "events.jsonl"
+    manifest_path = runtime_root / MANIFEST_NAME
     if not state_path.is_file():
         raise AssertionError(f"missing state.json: {state_path}")
     if not events_path.is_file():
         raise AssertionError(f"missing events.jsonl: {events_path}")
+    if not manifest_path.is_file():
+        raise AssertionError(f"missing {MANIFEST_NAME}: {manifest_path}")
 
     for artifact in REQUIRED_ARTIFACTS:
         path = runtime_root / artifact
@@ -70,6 +78,24 @@ def _assert_common_success(output: str, runtime_root: Path) -> dict[str, Any]:
         raise AssertionError("software report does not contain the exact pytest command")
 
     state = _load_json(state_path)
+    manifest = _load_json(manifest_path)
+    if manifest.get("run_id") != runtime_root.name:
+        raise AssertionError("run manifest run_id does not match runtime directory")
+    if manifest.get("scenario") != expected_scenario:
+        raise AssertionError("run manifest scenario does not match requested scenario")
+    if manifest.get("status") != "completed":
+        raise AssertionError("run manifest status is not completed")
+    if manifest.get("test_command") != EXACT_TEST_COMMAND:
+        raise AssertionError("run manifest test command is not exact")
+    if manifest.get("test_exit_code") != 0:
+        raise AssertionError("run manifest test exit code is not zero")
+    if manifest.get("process_exit_code") != 0:
+        raise AssertionError("run manifest process exit code is not zero")
+    if state.get("run_id") != manifest.get("run_id"):
+        raise AssertionError("state run_id does not match run manifest")
+    for artifact in manifest.get("artifacts", []):
+        if not (runtime_root / artifact).is_file():
+            raise AssertionError(f"manifest artifact is missing: {artifact}")
     if state.get("status") != "completed":
         raise AssertionError(f"state status is not completed: {state.get('status')}")
     if int(state.get("phase", 0)) < 1:
@@ -163,7 +189,7 @@ def _run_scenario(scenario: str, state_dir: Path) -> Path:
         )
 
     runtime_root = _runtime_root_from_output(output)
-    _assert_common_success(output, runtime_root)
+    _assert_common_success(output, runtime_root, scenario)
     if scenario == "retry-once":
         _assert_retry_once(output, runtime_root)
     if scenario == "local-recovery":
