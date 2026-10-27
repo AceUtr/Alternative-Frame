@@ -47,8 +47,9 @@ runs/edge_cloud_long_horizon/<run_id>/
 - `examples/edge_cloud/runtime_view_cloud_edge_fallback.json`
 - `examples/edge_cloud/samples/normal/`
 - `examples/edge_cloud/samples/cloud_edge_fallback/`
+- `examples/edge_cloud/samples/pause_resume/`
 
-后两个目录是交给 D 的固定演示输入，每个目录包含同一 `run_id` 对齐的 `state.json`、`events.jsonl` 和 `runtime_view.json`。
+这些目录是交给 D 的固定演示输入，每个目录包含同一 `run_id` 对齐的 `state.json`、`events.jsonl` 和 `runtime_view.json`。`pause_resume/` 展示运行在第二阶段暂停，恢复时 current probe 确认 cloud 离线，第三阶段任务改由 edge 执行并最终完成。
 
 三类文件必须使用同一个 `run_id` 对齐。UI 或 benchmark 只能读取 `state.json`、`events.jsonl`、`runtime_view.json`，不得回写原始文件。
 新生成的 v1.0 数据总是带 `run_id`；为兼容第二阶段已经生成的 v1.0 文件，读取端应允许该字段缺失，并将其标记为 `unknown` 或从对应 `state.json` 补齐。
