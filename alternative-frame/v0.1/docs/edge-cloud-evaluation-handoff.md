@@ -1,10 +1,10 @@
 # 端边云模块交接给 D 同学
 
-日期：2026-10-27  
-交接方：C（端边云）  
-接收方：D（评测、基准与比赛交付）  
-当前代码分支：`feature/edge-cloud-runtime`  
-当前本地基线：`758715e`  
+日期：2026-10-27
+交接方：C（端边云）
+接收方：D（评测、基准与比赛交付）
+当前代码分支：[`feature/edge-cloud-runtime`](https://github.com/AceUtr/Alternative-Frame/tree/feature/edge-cloud-runtime)
+交接提交：[`50c266c`](https://github.com/AceUtr/Alternative-Frame/commit/50c266c)
 
 ## 1. 交接目的
 
@@ -36,7 +36,7 @@ examples/edge_cloud/samples/pause_resume/
 
 ## 3. `runtime_view.json` 数据契约
 
-Schema 定义：`examples/edge_cloud/runtime_view.schema.json`  
+Schema 定义：`examples/edge_cloud/runtime_view.schema.json`
 字段说明：`docs/edge-cloud.md`
 
 顶层结构保持兼容：
@@ -87,7 +87,7 @@ python -c "from pathlib import Path; from run_edge_cloud_replan_demo import run_
 - 本次交接补充了暂停恢复固定样例及相关说明。
 - 已核对暂停恢复样例的 `run_id`、`schema_version`、完成状态和关键路由事件。
 - 本次没有重跑端边云专项测试、贡献门禁或全量回归；请不要把这次交接文档视为最终验收报告。
-- 当前改动尚未提交或推送 GitHub，仍在本地 `feature/edge-cloud-runtime` 工作区。
+- 本次交接样例和文档已提交并推送到 `feature/edge-cloud-runtime`，提交为 `50c266c`。D 可从上述分支获取。
 - C 负责节点、路由、回退、暂停恢复和 `runtime_view` 数据生产；D 负责统一评测、指标独立复算、对照实验和评测展示。请勿把 `GenExp`、`robin` 或 `science-sandbox` 的业务代码并入端边云模块。
 
 ## 7. 相关文件
