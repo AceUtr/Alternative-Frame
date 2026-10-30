@@ -1,7 +1,0 @@
-{"time": "2026-08-14T06:01:53.674106+00:00", "event": "run_started", "payload": {"resume": false}}
-{"time": "2026-08-14T06:01:53.679155+00:00", "event": "phase_planned", "payload": {"phase": 1, "plan_goal": "deliver verified artifacts", "tasks": [{"id": "produce", "role": "writer", "depends_on": []}, {"id": "review", "role": "reviewer", "depends_on": ["produce"]}]}}
-{"time": "2026-08-14T06:01:53.686106+00:00", "event": "local_recovery_started", "payload": {"cycle": 1, "failed": ["produce"], "blocked": ["review"], "impacted": ["produce", "review"], "frozen": []}}
-{"time": "2026-08-14T06:01:53.691106+00:00", "event": "local_recovery_planned", "payload": {"cycle": 1, "tasks": [{"id": "produce", "role": "writer", "depends_on": []}, {"id": "review", "role": "reviewer", "depends_on": ["produce"]}]}}
-{"time": "2026-08-14T06:01:53.704114+00:00", "event": "local_recovery_finished", "payload": {"cycle": 1, "status": "success", "recovered": ["produce", "review"], "remaining_failed": []}}
-{"time": "2026-08-14T06:01:53.708735+00:00", "event": "phase_finished", "payload": {"phase": 1, "completed": true, "reason": "all phase tasks and their acceptance checks passed", "satisfied_criteria": [], "missing_criteria": [], "failures": [], "next_focus": [], "evidence": ["phase_tasks_passed=2"]}}
-{"time": "2026-08-14T06:01:53.713636+00:00", "event": "run_completed", "payload": {"phase": 1}}
