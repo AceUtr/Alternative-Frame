@@ -1,0 +1,91 @@
+{
+  "benchmark_name": "smoke",
+  "cases": [
+    {
+      "run_count": 2,
+      "completed_run_count": 2,
+      "final_goal_completion_rate": 1.0,
+      "task_count": 6,
+      "success_count": 6,
+      "subtask_success_rate": 1.0,
+      "first_pass_count": 6,
+      "first_pass_rate": 1.0,
+      "retry_count": 0,
+      "local_recovery_count": 0,
+      "additional_phase_count": 0,
+      "mean_duration_seconds": 0.001,
+      "tool_calls": 0,
+      "successful_tool_calls": 0,
+      "tool_success_rate": null,
+      "total_tokens": 0,
+      "estimated_cost": null,
+      "human_interventions": 0,
+      "node_distribution": {
+        "device": 0,
+        "edge": 0,
+        "cloud": 0,
+        "unknown": 6
+      },
+      "node_failures": {
+        "device": 0,
+        "edge": 0,
+        "cloud": 0,
+        "unknown": 0
+      },
+      "node_durations": {
+        "device": null,
+        "edge": null,
+        "cloud": null,
+        "unknown": 0.0
+      },
+      "case_name": "research-multi",
+      "run_ids": [
+        "research-multi-20260812T043959250560Z-1-7f435a",
+        "research-multi-20260812T043959250560Z-2-a00856"
+      ]
+    },
+    {
+      "run_count": 2,
+      "completed_run_count": 2,
+      "final_goal_completion_rate": 1.0,
+      "task_count": 10,
+      "success_count": 10,
+      "subtask_success_rate": 1.0,
+      "first_pass_count": 10,
+      "first_pass_rate": 1.0,
+      "retry_count": 0,
+      "local_recovery_count": 0,
+      "additional_phase_count": 0,
+      "mean_duration_seconds": 0.0,
+      "tool_calls": 0,
+      "successful_tool_calls": 0,
+      "tool_success_rate": null,
+      "total_tokens": 0,
+      "estimated_cost": null,
+      "human_interventions": 0,
+      "node_distribution": {
+        "device": 0,
+        "edge": 0,
+        "cloud": 0,
+        "unknown": 10
+      },
+      "node_failures": {
+        "device": 0,
+        "edge": 0,
+        "cloud": 0,
+        "unknown": 0
+      },
+      "node_durations": {
+        "device": null,
+        "edge": null,
+        "cloud": null,
+        "unknown": 0.0
+      },
+      "case_name": "software-single",
+      "run_ids": [
+        "software-single-20260812T043959250560Z-1-47c01f",
+        "software-single-20260812T043959250560Z-2-90300a"
+      ]
+    }
+  ]
+}

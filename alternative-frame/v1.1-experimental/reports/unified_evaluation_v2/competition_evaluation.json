@@ -1,0 +1,73 @@
+{
+  "generated_at": "2026-08-14T05:41:33.717737+00:00",
+  "agent_wall_clock_speedup": 1.2476890264854648,
+  "live_llm_available": false,
+  "sources": {
+    "agents": "benchmarks\\results\\summary\\deterministic_agents-20260814T053258049374Z.json",
+    "recovery": "benchmarks\\results\\summary\\deterministic_recovery-20260814T052059930828Z.json",
+    "contract": "benchmarks\\results\\summary\\deterministic_contract-20260814T052657961412Z.json",
+    "research": "benchmarks\\results\\summary\\research_recorded-20260814T045729288642Z.json"
+  },
+  "rows": [
+    {
+      "experiment": "agent_topology",
+      "condition": "single_agent",
+      "evidence_kind": "deterministic_controlled_run",
+      "goal_completion_rate": 1.0,
+      "mean_duration_seconds": 0.40476392000127814,
+      "parallel_overlap_seconds": 0.0,
+      "unique_backend_count": 1,
+      "key_result": "single shared backend"
+    },
+    {
+      "experiment": "agent_topology",
+      "condition": "multi_agent",
+      "evidence_kind": "deterministic_controlled_run",
+      "goal_completion_rate": 1.0,
+      "mean_duration_seconds": 0.32441089999920225,
+      "parallel_overlap_seconds": 0.08025545999989844,
+      "unique_backend_count": 5,
+      "key_result": "1.248x wall-clock speedup"
+    },
+    {
+      "experiment": "local_recovery",
+      "condition": "recovery_off",
+      "evidence_kind": "deterministic_controlled_run",
+      "goal_completion_rate": 0,
+      "mean_duration_seconds": null,
+      "parallel_overlap_seconds": null,
+      "unique_backend_count": null,
+      "key_result": "injected failure remained failed"
+    },
+    {
+      "experiment": "local_recovery",
+      "condition": "recovery_on",
+      "evidence_kind": "deterministic_controlled_run",
+      "goal_completion_rate": 1,
+      "mean_duration_seconds": null,
+      "parallel_overlap_seconds": null,
+      "unique_backend_count": null,
+      "key_result": "one local recovery cycle restored success"
+    },
+    {
+      "experiment": "contract_validation",
+      "condition": "contract_off",
+      "evidence_kind": "deterministic_controlled_run",
+      "goal_completion_rate": 1,
+      "mean_duration_seconds": null,
+      "parallel_overlap_seconds": null,
+      "unique_backend_count": null,
+      "key_result": "false completion accepted"
+    },
+    {
+      "experiment": "contract_validation",
+      "condition": "contract_on",
+      "evidence_kind": "deterministic_controlled_run",
+      "goal_completion_rate": 0,
+      "mean_duration_seconds": null,
+      "parallel_overlap_seconds": null,
+      "unique_backend_count": null,
+      "key_result": "missing final_evidence correctly rejected"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "task_id": "cloud_edge_fallback",
+  "node_id": "edge-1",
+  "node_type": "edge",
+  "dependencies": []
+}

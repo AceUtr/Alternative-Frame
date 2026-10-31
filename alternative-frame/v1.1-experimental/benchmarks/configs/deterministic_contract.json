@@ -1,0 +1,6 @@
+﻿{
+  "name": "deterministic_contract_ablation",
+  "description": "Controlled contract-validation ablation without model API.",
+  "evidence_kind": "deterministic_controlled_run",
+  "modes": ["contract_off", "contract_on"]
+}

@@ -1,0 +1,4 @@
+[
+  {"tool": "runtime_executor", "task_id": "experiment", "node_type": "cloud", "success": false, "duration": 0.01, "fallback_count": 0, "failure_kind": "node_offline"},
+  {"tool": "runtime_executor", "task_id": "experiment", "node_type": "edge", "success": true, "duration": 0.02, "fallback_count": 1}
+]

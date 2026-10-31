@@ -1,0 +1,9 @@
+﻿experiment,condition,evidence_kind,completed,key_metric,result
+agent_topology,single_agent,deterministic_controlled_run,True,0.40267030000686643,100% completion; single serialized backend
+agent_topology,multi_agent,deterministic_controlled_run,True,0.32246716000372544,1.249x wall-clock speedup
+local_recovery,recovery_off,deterministic_controlled_run,False,0,injected failure remained failed
+local_recovery,recovery_on,deterministic_controlled_run,True,1,local recovery restored success without rerunning frozen predecessor
+contract_validation,contract_off,deterministic_controlled_run,True,,false completion accepted
+contract_validation,contract_on,deterministic_controlled_run,False,final_evidence,missing final evidence detected
+routing,fixed_cloud,deterministic_controlled_run,False,0,cloud outage caused final failure
+routing,dynamic_routing,deterministic_controlled_run,True,1,cloud failure preserved; fallback to edge succeeded

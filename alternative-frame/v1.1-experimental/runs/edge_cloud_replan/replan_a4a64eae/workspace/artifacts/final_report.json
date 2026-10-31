@@ -1,0 +1,8 @@
+{
+  "task_id": "final_report",
+  "node_id": "edge-1",
+  "node_type": "edge",
+  "dependencies": [
+    "post_resume_task"
+  ]
+}

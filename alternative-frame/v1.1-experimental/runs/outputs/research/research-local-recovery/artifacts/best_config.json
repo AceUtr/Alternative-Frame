@@ -1,0 +1,23 @@
+{
+  "best_experiment": "nearest_centroid_two_features_v1",
+  "primary_metric": "accuracy",
+  "mode": "max",
+  "best_score": 0.95,
+  "dataset_version": "synthetic-centroids-v2",
+  "seed": 1729,
+  "features_used": [
+    "x1",
+    "x2"
+  ],
+  "source_metrics": "artifacts/improved_metrics.json",
+  "candidates": [
+    {
+      "experiment": "nearest_centroid_v1",
+      "score": 0.8
+    },
+    {
+      "experiment": "nearest_centroid_two_features_v1",
+      "score": 0.95
+    }
+  ]
+}

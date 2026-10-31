@@ -1,0 +1,117 @@
+{
+  "generated_at": "2026-08-14T05:29:23.064920+00:00",
+  "evidence_classes": [
+    "deterministic_controlled_run",
+    "recorded_real_run"
+  ],
+  "live_real_run_available": false,
+  "sources": {
+    "research": "benchmarks\\results\\summary\\research_recorded-20260814T045729288642Z.json",
+    "recovery": "benchmarks\\results\\summary\\deterministic_recovery-20260814T052059930828Z.json",
+    "contract": "benchmarks\\results\\summary\\deterministic_contract-20260814T052657961412Z.json"
+  },
+  "rows": [
+    {
+      "experiment": "recorded_research",
+      "case": "research_normal",
+      "evidence_kind": "recorded_real_run",
+      "goal_completed": true,
+      "status": "completed",
+      "task_count": 8,
+      "success_count": 8,
+      "first_pass_count": 8,
+      "local_recovery_count": 0,
+      "phase_count": 2,
+      "extra_planned_tasks": 0,
+      "false_completion_detected": null,
+      "missing_criteria": null,
+      "duration_seconds": 0.43573
+    },
+    {
+      "experiment": "recorded_research",
+      "case": "research_local_recovery",
+      "evidence_kind": "recorded_real_run",
+      "goal_completed": true,
+      "status": "completed",
+      "task_count": 11,
+      "success_count": 8,
+      "first_pass_count": 7,
+      "local_recovery_count": 1,
+      "phase_count": 2,
+      "extra_planned_tasks": 3,
+      "false_completion_detected": null,
+      "missing_criteria": null,
+      "duration_seconds": 0.505034
+    },
+    {
+      "experiment": "local_recovery_ablation",
+      "case": "recovery_off",
+      "evidence_kind": "deterministic_controlled_run",
+      "goal_completed": false,
+      "status": "failed",
+      "task_count": 3,
+      "success_count": 1,
+      "first_pass_count": null,
+      "local_recovery_count": 0,
+      "phase_count": 1,
+      "extra_planned_tasks": 0,
+      "false_completion_detected": null,
+      "missing_criteria": null,
+      "duration_seconds": null
+    },
+    {
+      "experiment": "local_recovery_ablation",
+      "case": "recovery_on",
+      "evidence_kind": "deterministic_controlled_run",
+      "goal_completed": true,
+      "status": "success",
+      "task_count": 3,
+      "success_count": 3,
+      "first_pass_count": null,
+      "local_recovery_count": 1,
+      "phase_count": 1,
+      "extra_planned_tasks": 1,
+      "false_completion_detected": null,
+      "missing_criteria": null,
+      "duration_seconds": null
+    },
+    {
+      "experiment": "contract_ablation",
+      "case": "contract_off",
+      "evidence_kind": "deterministic_controlled_run",
+      "goal_completed": true,
+      "status": "success",
+      "task_count": null,
+      "success_count": null,
+      "first_pass_count": null,
+      "local_recovery_count": 0,
+      "phase_count": 1,
+      "extra_planned_tasks": 0,
+      "false_completion_detected": false,
+      "missing_criteria": "",
+      "duration_seconds": null
+    },
+    {
+      "experiment": "contract_ablation",
+      "case": "contract_on",
+      "evidence_kind": "deterministic_controlled_run",
+      "goal_completed": false,
+      "status": "success",
+      "task_count": null,
+      "success_count": null,
+      "first_pass_count": null,
+      "local_recovery_count": 0,
+      "phase_count": 1,
+      "extra_planned_tasks": 0,
+      "false_completion_detected": true,
+      "missing_criteria": "final_evidence",
+      "duration_seconds": null
+    }
+  ],
+  "figures": [
+    "reports\\unified_evaluation\\figures\\recovery_completion.png",
+    "reports\\unified_evaluation\\figures\\recovery_execution_cost.png",
+    "reports\\unified_evaluation\\figures\\contract_completion_decision.png",
+    "reports\\unified_evaluation\\figures\\recorded_research.png"
+  ]
+}

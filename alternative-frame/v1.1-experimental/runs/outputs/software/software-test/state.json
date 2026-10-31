@@ -1,0 +1,309 @@
+{
+  "run_id": "software-test",
+  "goal": "Repair the supplied buggy application and prove the exact test command passes",
+  "max_phases": 2,
+  "max_total_tasks": 8,
+  "status": "completed",
+  "phase": 2,
+  "total_tasks": 4,
+  "completed_tasks": [
+    "phase-1:diagnose_failure",
+    "phase-2:implement_fix",
+    "phase-2:verify_fix",
+    "phase-2:write_report"
+  ],
+  "failed_tasks": [],
+  "artifacts": [
+    "artifacts/diagnosis.json",
+    "app.py",
+    "artifacts/software_report.md"
+  ],
+  "evidence_records": [
+    {
+      "tool": "file_editor",
+      "arguments": {
+        "action": "read",
+        "path": "requirements.md"
+      },
+      "success": true,
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "metadata": {},
+      "output_excerpt": "# Requirement\n\n`add(a, b)` must return the arithmetic sum.\n"
+    },
+    {
+      "tool": "file_editor",
+      "arguments": {
+        "action": "read",
+        "path": "app.py"
+      },
+      "success": true,
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "metadata": {},
+      "output_excerpt": "def add(a, b):\n    return a - b\n"
+    },
+    {
+      "tool": "file_editor",
+      "arguments": {
+        "action": "read",
+        "path": "test_app.py"
+      },
+      "success": true,
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "metadata": {},
+      "output_excerpt": "from app import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-2, 5) == 3\n"
+    },
+    {
+      "tool": "test_runner",
+      "arguments": {
+        "command": "python -m pytest test_app.py -q -p no:cacheprovider"
+      },
+      "success": false,
+      "exit_code": 1,
+      "duration_seconds": 0.408,
+      "metadata": {
+        "command": "python -m pytest test_app.py -q -p no:cacheprovider",
+        "passed": false,
+        "passed_count": 0,
+        "failed_count": 1
+      },
+      "output_excerpt": "F                                                                        [100%]\n================================== FAILURES ===================================\n__________________________________ test_add ___________________________________\n\n    def test_add():\n>       assert add(1, 2) == 3\nE       assert -1 == 3\nE        +  where -1 = add(1, 2)\n\ntest_app.py:5: AssertionError\n=========================== short test summary info ===========================\nFAILED test_app.py::test_add - assert -1 == 3\n1 failed in 0.03s\n\nError processing line 1 of E:\\anaconda\\anaconda_anaconda\\Lib\\site-packages\\distutils-precedence.pth:\n\n  Traceback (most recent call last):\n    File \"<frozen site>\", line 206, in addpackage\n    File \"<string>\", line 1, in <module>\n  ModuleNotFoundError: No module named '_distutils_hack'\n\nRemainder of file ignored\n"
+    },
+    {
+      "tool": "file_editor",
+      "arguments": {
+        "action": "write",
+        "path": "artifacts/diagnosis.json",
+        "content": "{\n  \"status\": \"confirmed\",\n  \"observed_test_exit_code\": 1,\n  \"fault\": \"add returns subtraction instead of addition\",\n  \"repair\": {\n    \"path\": \"app.py\",\n    \"function\": \"add\",\n    \"operator\": \"add\"\n  }\n}"
+      },
+      "success": true,
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "metadata": {
+        "artifacts": [
+          "artifacts\\diagnosis.json"
+        ],
+        "action": "write"
+      },
+      "output_excerpt": "wrote artifacts\\diagnosis.json"
+    },
+    {
+      "tool": "python_ast_repair",
+      "arguments": {
+        "path": "app.py",
+        "function": "add",
+        "operator": "add"
+      },
+      "success": true,
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "metadata": {
+        "artifacts": [
+          "app.py"
+        ],
+        "previous_operator": "Sub",
+        "operator": "add"
+      },
+      "output_excerpt": "changed add operator from Sub to Add"
+    },
+    {
+      "tool": "test_runner",
+      "arguments": {
+        "command": "python -m pytest test_app.py -q -p no:cacheprovider"
+      },
+      "success": true,
+      "exit_code": 0,
+      "duration_seconds": 0.373,
+      "metadata": {
+        "command": "python -m pytest test_app.py -q -p no:cacheprovider",
+        "passed": true,
+        "passed_count": 1,
+        "failed_count": 0
+      },
+      "output_excerpt": ".                                                                        [100%]\n1 passed in 0.00s\n\nError processing line 1 of E:\\anaconda\\anaconda_anaconda\\Lib\\site-packages\\distutils-precedence.pth:\n\n  Traceback (most recent call last):\n    File \"<frozen site>\", line 206, in addpackage\n    File \"<string>\", line 1, in <module>\n  ModuleNotFoundError: No module named '_distutils_hack'\n\nRemainder of file ignored\n"
+    },
+    {
+      "tool": "file_editor",
+      "arguments": {
+        "action": "write",
+        "path": "artifacts/software_report.md",
+        "content": "# Software Repair Report\n\n- Modified file: `app.py`\n- Repair method: Python AST operator update (`Sub` to `Add`)\n- Exact test command: `python -m pytest test_app.py -q -p no:cacheprovider`\n- Exit code: `0`\n- Passed: `1`\n- Remaining risk: this fixture validates a small arithmetic repair, not arbitrary repository repair.\n"
+      },
+      "success": true,
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "metadata": {
+        "artifacts": [
+          "artifacts\\software_report.md"
+        ],
+        "action": "write"
+      },
+      "output_excerpt": "wrote artifacts\\software_report.md"
+    }
+  ],
+  "acceptance_contract": {
+    "goal": "Repair the supplied buggy application and prove the exact test command passes",
+    "goal_summary": "Diagnose, repair, test, and report a reproducible software defect",
+    "criteria": [
+      {
+        "id": "diagnosis",
+        "description": "Baseline failure was diagnosed",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/diagnosis.json",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "repaired_source",
+        "description": "The repaired source has current-run provenance",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "app.py",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "exact_tests",
+        "description": "The exact regression command exits successfully",
+        "check_type": "command",
+        "required": true,
+        "path": null,
+        "command": "python -m pytest test_app.py -q -p no:cacheprovider",
+        "metric_name": null,
+        "threshold": null
+      },
+      {
+        "id": "report",
+        "description": "A current-run evidence report exists",
+        "check_type": "file_exists",
+        "required": true,
+        "path": "artifacts/software_report.md",
+        "command": null,
+        "metric_name": null,
+        "threshold": null
+      }
+    ],
+    "constraints": [
+      "offline",
+      "workspace-scoped tools",
+      "no prose-only completion"
+    ]
+  },
+  "decisions": [
+    "phase 1: continue - deterministic contract acceptance gates did not pass",
+    "phase 2: final goal accepted - all deterministic contract acceptance gates passed"
+  ],
+  "phases": [
+    {
+      "number": 1,
+      "plan_goal": "Repair the supplied buggy application and prove the exact test command passes",
+      "task_ids": [
+        "diagnose_failure"
+      ],
+      "status": "incomplete",
+      "report_status": "success",
+      "evaluation": {
+        "completed": false,
+        "reason": "deterministic contract acceptance gates did not pass",
+        "satisfied_criteria": [
+          "diagnosis"
+        ],
+        "missing_criteria": [
+          "repaired_source",
+          "exact_tests",
+          "report"
+        ],
+        "failures": [
+          "repaired_source: output exists but has no artifact provenance in this run: app.py",
+          "exact_tests: no successful exit-code-0 evidence for exact command: python -m pytest test_app.py -q -p no:cacheprovider",
+          "report: missing required output: artifacts/software_report.md"
+        ],
+        "next_focus": [
+          "satisfy contract criterion: repaired_source",
+          "satisfy contract criterion: exact_tests",
+          "satisfy contract criterion: report"
+        ],
+        "evidence": [
+          "diagnosis: artifact=artifacts/diagnosis.json"
+        ]
+      },
+      "failures": [],
+      "artifacts": [
+        "artifacts/diagnosis.json"
+      ],
+      "started_at": "2026-10-31T02:34:51.244967+00:00",
+      "finished_at": "2026-10-31T02:34:51.655388+00:00",
+      "local_recovery_cycles": 0,
+      "executed_task_count": 1
+    },
+    {
+      "number": 2,
+      "plan_goal": "Repair the supplied buggy application and prove the exact test command passes",
+      "task_ids": [
+        "implement_fix",
+        "verify_fix",
+        "write_report"
+      ],
+      "status": "accepted",
+      "report_status": "success",
+      "evaluation": {
+        "completed": true,
+        "reason": "all deterministic contract acceptance gates passed",
+        "satisfied_criteria": [
+          "diagnosis",
+          "repaired_source",
+          "exact_tests",
+          "report"
+        ],
+        "missing_criteria": [],
+        "failures": [],
+        "next_focus": [],
+        "evidence": [
+          "diagnosis: artifact=artifacts/diagnosis.json",
+          "repaired_source: artifact=app.py",
+          "exact_tests: command=python -m pytest test_app.py -q -p no:cacheprovider",
+          "exact_tests: exit_code=0",
+          "report: artifact=artifacts/software_report.md"
+        ]
+      },
+      "failures": [],
+      "artifacts": [
+        "app.py",
+        "artifacts/software_report.md"
+      ],
+      "started_at": "2026-10-31T02:34:51.660820+00:00",
+      "finished_at": "2026-10-31T02:34:52.035106+00:00",
+      "local_recovery_cycles": 0,
+      "executed_task_count": 3
+    }
+  ],
+  "pending_plan": null,
+  "last_evaluation": {
+    "completed": true,
+    "reason": "all deterministic contract acceptance gates passed",
+    "satisfied_criteria": [
+      "diagnosis",
+      "repaired_source",
+      "exact_tests",
+      "report"
+    ],
+    "missing_criteria": [],
+    "failures": [],
+    "next_focus": [],
+    "evidence": [
+      "diagnosis: artifact=artifacts/diagnosis.json",
+      "repaired_source: artifact=app.py",
+      "exact_tests: command=python -m pytest test_app.py -q -p no:cacheprovider",
+      "exact_tests: exit_code=0",
+      "report: artifact=artifacts/software_report.md"
+    ]
+  },
+  "last_error": null,
+  "created_at": "2026-10-31T02:34:51.240968+00:00",
+  "updated_at": "2026-10-31T02:34:52.038126+00:00"
+}

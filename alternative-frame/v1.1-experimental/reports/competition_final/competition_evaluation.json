@@ -1,0 +1,83 @@
+{
+  "generated_at": "2026-10-31T02:35:32.588489+00:00",
+  "agent_speedup": 1.248717233724558,
+  "routing_result": {
+    "fixed_cloud_completed": false,
+    "dynamic_completed": true,
+    "dynamic_final_node": "edge",
+    "fallback_count": 1
+  },
+  "sources": {
+    "agents": "benchmarks\\results\\summary\\deterministic_agents-20261031T023528669480Z.json",
+    "recovery": "benchmarks\\results\\summary\\deterministic_recovery-20261031T023528826534Z.json",
+    "contract": "benchmarks\\results\\summary\\deterministic_contract-20261031T023528999323Z.json",
+    "routing": "benchmarks\\results\\summary\\deterministic_routing-20261031T023529161421Z.json",
+    "research": "benchmarks\\results\\summary\\research_recorded-20260814T045729288642Z.json"
+  },
+  "rows": [
+    {
+      "experiment": "agent_topology",
+      "condition": "single_agent",
+      "evidence_kind": "deterministic_controlled_run",
+      "completed": true,
+      "key_metric": 0.40267030000686643,
+      "result": "100% completion; single serialized backend"
+    },
+    {
+      "experiment": "agent_topology",
+      "condition": "multi_agent",
+      "evidence_kind": "deterministic_controlled_run",
+      "completed": true,
+      "key_metric": 0.32246716000372544,
+      "result": "1.249x wall-clock speedup"
+    },
+    {
+      "experiment": "local_recovery",
+      "condition": "recovery_off",
+      "evidence_kind": "deterministic_controlled_run",
+      "completed": false,
+      "key_metric": 0,
+      "result": "injected failure remained failed"
+    },
+    {
+      "experiment": "local_recovery",
+      "condition": "recovery_on",
+      "evidence_kind": "deterministic_controlled_run",
+      "completed": true,
+      "key_metric": 1,
+      "result": "local recovery restored success without rerunning frozen predecessor"
+    },
+    {
+      "experiment": "contract_validation",
+      "condition": "contract_off",
+      "evidence_kind": "deterministic_controlled_run",
+      "completed": true,
+      "key_metric": null,
+      "result": "false completion accepted"
+    },
+    {
+      "experiment": "contract_validation",
+      "condition": "contract_on",
+      "evidence_kind": "deterministic_controlled_run",
+      "completed": false,
+      "key_metric": "final_evidence",
+      "result": "missing final evidence detected"
+    },
+    {
+      "experiment": "routing",
+      "condition": "fixed_cloud",
+      "evidence_kind": "deterministic_controlled_run",
+      "completed": false,
+      "key_metric": 0,
+      "result": "cloud outage caused final failure"
+    },
+    {
+      "experiment": "routing",
+      "condition": "dynamic_routing",
+      "evidence_kind": "deterministic_controlled_run",
+      "completed": true,
+      "key_metric": 1,
+      "result": "cloud failure preserved; fallback to edge succeeded"
+    }
+  ]
+}

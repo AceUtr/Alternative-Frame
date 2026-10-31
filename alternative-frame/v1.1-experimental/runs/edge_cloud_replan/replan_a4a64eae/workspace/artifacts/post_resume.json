@@ -1,0 +1,6 @@
+{
+  "task_id": "post_resume_task",
+  "node_id": "cloud-1",
+  "node_type": "cloud",
+  "dependencies": []
+}

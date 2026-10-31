@@ -1,0 +1,6 @@
+{
+  "task_id": "device_sensitive_preprocess",
+  "node_id": "device-1",
+  "node_type": "device",
+  "dependencies": []
+}
