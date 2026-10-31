@@ -6,7 +6,14 @@ The key is read only from process memory and is never persisted.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import subprocess
+import time
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from core.agents import Agent, AgentRegistry
@@ -125,10 +132,70 @@ def main():
         max_total_tasks=12,
         acceptance_contract=contract.to_dict(),
     )
+    started = time.perf_counter()
     report = controller.run(GOAL, run_id=run_id)
+    duration = time.perf_counter() - started
     state = report.state
+    records = [record for record in state.evidence_records if record.get("call_type") == "model_call"]
+    usage_rows = [record.get("usage") for record in records]
+    usage_complete = bool(usage_rows) and all(isinstance(row, dict) and row for row in usage_rows)
+    if usage_complete:
+        prompt_tokens = sum(int(row.get("prompt_tokens", row.get("input_tokens", 0))) for row in usage_rows)
+        completion_tokens = sum(int(row.get("completion_tokens", row.get("output_tokens", 0))) for row in usage_rows)
+        total_tokens = sum(int(row.get("total_tokens", int(row.get("prompt_tokens", row.get("input_tokens", 0))) + int(row.get("completion_tokens", row.get("output_tokens", 0))))) for row in usage_rows)
+    else:
+        prompt_tokens = completion_tokens = total_tokens = None
+    try:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parent, check=True,
+                                capture_output=True, text=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit = "unknown"
+    parts = urlsplit(client.config.base_url)
+    endpoint = f"{parts.scheme}://{parts.hostname}" if parts.hostname else "unknown"
+    artifacts = []
+    for relative in state.artifacts:
+        candidate = (workspace / relative).resolve()
+        if workspace.resolve() not in candidate.parents or not candidate.is_file():
+            continue
+        digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        artifacts.append({"path": relative, "sha256": digest, "size_bytes": candidate.stat().st_size})
+    input_rate = os.getenv("MODEL_INPUT_USD_PER_MILLION")
+    output_rate = os.getenv("MODEL_OUTPUT_USD_PER_MILLION")
+    estimated_cost = None
+    if prompt_tokens is not None and completion_tokens is not None and input_rate and output_rate:
+        estimated_cost = round((prompt_tokens * float(input_rate) + completion_tokens * float(output_rate)) / 1_000_000, 8)
+    evidence = {
+        "schema_version": "1.0",
+        "run_id": run_id,
+        "evidence_kind": "live_real_run",
+        "candidate_tag": os.getenv("CANDIDATE_TAG", "unreleased_worktree"),
+        "candidate_commit": commit,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "model": client.config.model,
+        "endpoint_redacted": endpoint,
+        "status": state.status,
+        "phase_count": state.phase,
+        "duration_seconds": round(duration, 3),
+        "model_call_count": len(records),
+        "token_usage_status": "reported" if usage_complete else "unknown",
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "estimated_cost_usd": estimated_cost,
+        "cost_status": "estimated" if estimated_cost is not None else "unknown",
+        "phases": [
+            {"number": phase.number, "status": phase.status, "report_status": phase.report_status,
+             "missing_criteria": phase.evaluation.get("missing_criteria", []),
+             "local_recovery_cycles": phase.local_recovery_cycles,
+             "executed_task_count": phase.executed_task_count}
+            for phase in state.phases
+        ],
+        "artifact_hashes": artifacts,
+    }
+    (workspace.parent / "live_run_evidence.json").write_text(json.dumps(evidence, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"run_id={run_id} status={state.status} phases={state.phase}")
     print(f"state={controller.store.state_path(run_id)}")
+    print(f"live_evidence={workspace.parent / 'live_run_evidence.json'}")
     if not state.phases or "final_evidence" not in state.phases[0].evaluation.get("missing_criteria", []):
         raise RuntimeError("phase one did not record the intended missing final_evidence criterion")
     if state.status != "completed" or state.phase < 2:

@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
+from benchmarks.provenance import benchmark_provenance
 
 from core.long_horizon import (
     AcceptanceContract,
@@ -317,6 +318,9 @@ def main() -> int:
             f"{timestamp}.json"
         )
     )
+    batch_run_id = output_path.stem
+    for result in results:
+        result["run_id"] = f"{batch_run_id}-{result['mode']}"
 
     output_path.write_text(
         json.dumps(
@@ -331,6 +335,8 @@ def main() -> int:
                 "generated_at": datetime.now(
                     timezone.utc
                 ).isoformat(),
+                "provenance": benchmark_provenance(batch_run_id, args.config,
+                    f"python run_deterministic_contract_ablation.py --config {args.config}", Path(__file__).resolve().parent),
                 "results": results,
             },
             indent=2,

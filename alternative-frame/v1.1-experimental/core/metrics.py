@@ -341,8 +341,11 @@ def metrics_from_report(report, domain: str, mode: str, model: str, started: flo
     any_usage_unknown = False
     for result in values:
         tool_records = list(getattr(result, "tool_records", []) or [])
-        successful_tools = sum(record.get("success") is True for record in tool_records)
-        model_call_count = sum(1 for evidence in getattr(result, "evidence", []) if evidence == "api_response_received" or str(evidence).startswith("model_step="))
+        tool_only_records = [record for record in tool_records if record.get("call_type") != "model_call"]
+        successful_tools = sum(record.get("success") is True for record in tool_only_records)
+        model_call_count = sum(1 for record in tool_records if record.get("call_type") == "model_call")
+        if not model_call_count:
+            model_call_count = sum(1 for evidence in getattr(result, "evidence", []) if evidence == "api_response_received" or str(evidence).startswith("model_step="))
         result_prompt: List[int] = []; result_completion: List[int] = []; result_total: List[int] = []
         for record in tool_records:
             prompt, completion, total = _usage_from_record(record)
@@ -368,7 +371,7 @@ def metrics_from_report(report, domain: str, mode: str, model: str, started: flo
             task_id=result.subtask_id, status=result.status, attempts=getattr(result, "attempts", 1),
             duration_seconds=_duration_seconds(getattr(result, "started_at", None), getattr(result, "finished_at", None)),
             node=_node_from_task(plan_map.get(result.subtask_id), result),
-            tool_call_count=len(tool_records), successful_tool_calls=successful_tools,
+            tool_call_count=len(tool_only_records), successful_tool_calls=successful_tools,
             model_call_count=model_call_count, prompt_tokens=task_prompt, completion_tokens=task_completion, total_tokens=task_total,
         ))
     counts, failures, durations = _node_aggregates(tasks)
@@ -386,7 +389,7 @@ def metrics_from_report(report, domain: str, mode: str, model: str, started: flo
         local_recovery_count=int(getattr(report, "local_recovery_cycles", 0) or 0), phase_count=1, additional_phase_count=0,
         model_calls=model_calls, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, total_tokens=total_tokens,
         estimated_cost=estimate_model_cost(prompt_tokens, completion_tokens, pricing),
-        tool_calls=sum(task.tool_call_count for task in tasks), successful_tool_calls=sum(task.successful_tool_calls for task in tasks),
+                tool_calls=sum(task.tool_call_count for task in tasks), successful_tool_calls=sum(task.successful_tool_calls for task in tasks),
         device_task_count=counts["device"], edge_task_count=counts["edge"], cloud_task_count=counts["cloud"], unknown_node_task_count=counts["unknown"],
         device_failed_count=failures["device"], edge_failed_count=failures["edge"], cloud_failed_count=failures["cloud"], unknown_node_failed_count=failures["unknown"],
         device_duration_seconds=durations["device"], edge_duration_seconds=durations["edge"], cloud_duration_seconds=durations["cloud"], unknown_node_duration_seconds=durations["unknown"],
@@ -403,7 +406,9 @@ def metrics_from_long_horizon(state, phase_reports: Iterable[Any] | None = None,
         for result in report.results.values():
             records = list(getattr(result, "tool_records", []) or [])
             evidence = list(getattr(result, "evidence", []) or [])
-            task_model_calls = sum(1 for item in evidence if item == "api_response_received" or str(item).startswith("model_step="))
+            task_model_calls = sum(1 for record in records if record.get("call_type") == "model_call")
+            if not task_model_calls:
+                task_model_calls = sum(1 for item in evidence if item == "api_response_received" or str(item).startswith("model_step="))
             model_calls += task_model_calls
             rp: List[int] = []; rc: List[int] = []; rt: List[int] = []
             for record in records:
@@ -417,7 +422,9 @@ def metrics_from_long_horizon(state, phase_reports: Iterable[Any] | None = None,
             tasks.append(TaskMetrics(
                 task_id=result.subtask_id, status=result.status, attempts=getattr(result, "attempts", 1),
                 duration_seconds=_duration_seconds(getattr(result, "started_at", None), getattr(result, "finished_at", None)),
-                node=_node_from_task(None, result), tool_call_count=len(records), successful_tool_calls=sum(record.get("success") is True for record in records),
+                node=_node_from_task(None, result),
+                tool_call_count=sum(record.get("call_type") != "model_call" for record in records),
+                successful_tool_calls=sum(record.get("success") is True and record.get("call_type") != "model_call" for record in records),
                 model_call_count=task_model_calls, prompt_tokens=sum(rp) if rp else None, completion_tokens=sum(rc) if rc else None, total_tokens=sum(rt) if rt else None,
             ))
     phase_count = len(getattr(state, "phases", []) or [])

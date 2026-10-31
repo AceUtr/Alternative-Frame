@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
+from benchmarks.provenance import benchmark_provenance
 
 from core.local_recovery import LocalDAGRecoveryController
 from core.models import AgentResult, Plan, SubTask
@@ -333,6 +334,9 @@ def main() -> int:
             f"{timestamp}.json"
         )
     )
+    batch_run_id = output_path.stem
+    for result in results:
+        result["run_id"] = f"{batch_run_id}-{result['mode']}"
 
     payload = {
         "experiment": config.get(
@@ -345,6 +349,8 @@ def main() -> int:
         "generated_at": datetime.now(
             timezone.utc
         ).isoformat(),
+        "provenance": benchmark_provenance(batch_run_id, args.config,
+            f"python run_deterministic_recovery_ablation.py --config {args.config}", Path(__file__).resolve().parent),
         "results": results,
     }
 

@@ -129,6 +129,15 @@ class OpenAICompatibleClient:
         message = dict(message)
         message["content"] = self._normalize_content(message)
         message["_finish_reason"] = choice.get("finish_reason")
+        usage = data.get("usage") if isinstance(data, dict) else None
+        if isinstance(usage, dict):
+            # Keep only numeric usage fields. Never persist response headers,
+            # prompts, credentials, or provider-specific sensitive metadata.
+            message["_usage"] = {
+                key: usage[key]
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens")
+                if isinstance(usage.get(key), int)
+            }
         return message
 
     @staticmethod

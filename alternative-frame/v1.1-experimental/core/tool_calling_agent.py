@@ -75,8 +75,18 @@ class ToolCallingAgent(Agent):
         call_counts = {}
         for step in range(self.max_steps):
             response = self.client.chat(messages, tools=self.tools.schemas())
+            model_config = getattr(self.client, "config", None)
+            model_record = {
+                "tool": "model",
+                "call_type": "model_call",
+                "success": True,
+                "duration_seconds": None,
+                "usage": response.get("_usage") if isinstance(response, dict) else None,
+                "metadata": {"model": getattr(model_config, "model", "unknown"), "step": step + 1},
+            }
             tool_calls = response.get("tool_calls", []) if isinstance(response, dict) else []
             if not tool_calls:
+                tool_records.append(model_record)
                 content = response.get("content", "") if isinstance(response, dict) else str(response)
                 return AgentResult(task.id, "success", summary=content, artifacts=artifacts, evidence=evidence + [f"model_step={step + 1}"], tool_records=tool_records, started_at=started, finished_at=utc_now())
             messages.append({"role": "assistant", "content": response.get("content", ""), "tool_calls": tool_calls})
@@ -143,4 +153,5 @@ class ToolCallingAgent(Agent):
                     },
                 )
                 messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": json.dumps(result.__dict__, ensure_ascii=False)})
+            tool_records.append(model_record)
         return AgentResult(task.id, "failed", summary=f"tool calling max steps exceeded ({self.max_steps})", evidence=evidence, tool_records=tool_records, failures=["max_tool_steps_exceeded"], started_at=started, finished_at=utc_now())

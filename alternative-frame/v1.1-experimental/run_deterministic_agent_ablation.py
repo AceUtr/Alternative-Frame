@@ -28,6 +28,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
+from benchmarks.provenance import benchmark_provenance
 
 from core.agents import Agent, AgentRegistry
 from core.models import AgentResult, Plan, SubTask
@@ -566,6 +567,9 @@ def main() -> int:
             f"{timestamp}.json"
         )
     )
+    batch_run_id = output_path.stem
+    for run in raw_runs:
+        run["run_id"] = f"{batch_run_id}-{run['mode']}-{run['repeat_index'] + 1}"
 
     payload = {
         "experiment": config.get(
@@ -581,6 +585,8 @@ def main() -> int:
         ),
         "repeats": repeats,
         "task_delay_seconds": delay,
+        "provenance": benchmark_provenance(batch_run_id, args.config,
+            f"python run_deterministic_agent_ablation.py --config {args.config}", Path(__file__).resolve().parent),
         "runs": raw_runs,
         "summaries": summaries,
     }

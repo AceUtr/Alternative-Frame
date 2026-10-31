@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,7 +13,11 @@ from core.model_client import ModelConfig, OpenAICompatibleClient
 
 
 def main():
-    out = Path('live_api_smoke_evidence.json')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--output', type=Path, default=Path('live_api_smoke_evidence.json'))
+    args = parser.parse_args()
+    out = args.output
+    out.parent.mkdir(parents=True, exist_ok=True)
     if not os.environ.get('MODEL_API_KEY') or not os.environ.get('MODEL_NAME'):
         print('Missing MODEL_API_KEY or MODEL_NAME; no request sent', file=sys.stderr)
         return 2
@@ -38,6 +43,7 @@ def main():
             'has_content': bool(content.strip()),
             'finish_reason': message.get('_finish_reason'),
             'usage': message.get('_usage', None),
+            'usage_status': 'reported' if message.get('_usage') else 'unknown',
         })
     except Exception as exc:
         # Do not write raw exceptions because upstream gateways may echo URL/token data.

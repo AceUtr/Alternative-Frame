@@ -193,3 +193,24 @@ def test_explicit_pricing_calculates_cost_and_missing_pricing_is_unknown():
     unknown = metrics_from_report(report, "research", "real", "model-x", 0.0, "unknown")
     assert priced.estimated_cost == 0.004
     assert unknown.estimated_cost is None
+
+
+def test_model_usage_records_are_counted_separately_from_tools():
+    report = SimpleNamespace(
+        status="success", rounds=1, local_recovery_cycles=0,
+        results={"t1": AgentResult(
+            "t1", "success",
+            tool_records=[
+                {"tool": "model", "call_type": "model_call", "success": True,
+                 "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}},
+                {"tool": "shell_runner", "success": True},
+                {"tool": "model", "call_type": "model_call", "success": True,
+                 "usage": {"prompt_tokens": 15, "completion_tokens": 3, "total_tokens": 18}},
+            ],
+        )},
+    )
+    metrics = metrics_from_report(report, "software", "real", "model-x", 0.0, "run-model-usage")
+    assert metrics.model_calls == 2
+    assert metrics.total_tokens == 30
+    assert metrics.tool_calls == 1
+    assert metrics.successful_tool_calls == 1

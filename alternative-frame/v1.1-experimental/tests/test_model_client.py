@@ -18,7 +18,10 @@ class FakeResponse:
         return False
 
     def read(self):
-        return json.dumps({"choices": [{"message": {"content": "OK"}}]}).encode("utf-8")
+        return json.dumps({
+            "choices": [{"message": {"content": "OK"}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+        }).encode("utf-8")
 
 
 def test_transient_connection_errors_are_retried(monkeypatch):
@@ -42,6 +45,7 @@ def test_transient_connection_errors_are_retried(monkeypatch):
     message = client.chat([{"role": "user", "content": "test"}])
 
     assert message["content"] == "OK"
+    assert message["_usage"] == {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
     assert outcomes == []
 
 
