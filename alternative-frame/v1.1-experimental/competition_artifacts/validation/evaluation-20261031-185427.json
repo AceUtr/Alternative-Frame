@@ -1,0 +1,59 @@
+{
+  "target": "evaluation",
+  "manifest": "validation/manifests/evaluation.json",
+  "status": "passed",
+  "started_at": "2026-10-31T10:54:26.681138+00:00",
+  "finished_at": "2026-10-31T10:54:27.991162+00:00",
+  "checks": [
+    {
+      "name": "required_files",
+      "category": "structure",
+      "status": "passed",
+      "detail": "all 7 required files exist",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "import:core.metrics",
+      "category": "import",
+      "status": "passed",
+      "detail": "imported core.metrics",
+      "duration_seconds": 0.01584569999249652
+    },
+    {
+      "name": "symbols:core.metrics",
+      "category": "interface",
+      "status": "passed",
+      "detail": "found 2 required symbols",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "domain_adapter",
+      "category": "interface",
+      "status": "skipped",
+      "detail": "not required for this contribution",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "sensitive_data_scan",
+      "category": "security",
+      "status": "passed",
+      "detail": "no credential or personal-path patterns found",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "tests:1",
+      "category": "tests",
+      "status": "passed",
+      "detail": "exit_code=0; command=python -m pytest tests/test_metrics.py tests/test_benchmark_runner.py -q -p no:cacheprovider; output=.............. [100%] 14 passed in 0.14s",
+      "duration_seconds": 1.085842300002696
+    },
+    {
+      "name": "smoke:1",
+      "category": "smoke",
+      "status": "passed",
+      "detail": "exit_code=0; command=python run_benchmarks.py --config benchmarks/configs/smoke.json; output=raw=[PERSONAL_PATH]\\Documents\\plan a project\\.final-v11-integration\\alternative-frame\\v1.1-experimental\\benchmarks\\results\\raw\\smoke-20261031T105427969157Z.jsonl summary_json=[PERSONAL_PATH]\\Documents\\plan a project\\.final-v11-integration\\alternative-frame\\v1.1-experimental\\benchmarks\\results\\summary\\smoke-20261031T105427969157Z.json summary_csv=[PERSONAL_PATH]\\Documents\\plan a project\\.final-v11-integration\\alternative-frame\\v1.1-experimental\\benchmarks\\results\\summary\\smoke-20261031T105427969157Z.csv",
+      "duration_seconds": 0.1952179000072647
+    }
+  ],
+  "report_path": "reports/contribution-validation/evaluation-20261031-185427.json"
+}

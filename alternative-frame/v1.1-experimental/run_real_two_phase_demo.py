@@ -81,6 +81,26 @@ def build_registry(client, workspace):
     return registry
 
 
+def aggregate_model_usage(records):
+    rows = [record.get("usage") for record in records if record.get("call_type") == "model_call"]
+    def number(row, primary, fallback):
+        value = row.get(primary, row.get(fallback)) if isinstance(row, dict) else None
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+    complete = bool(rows) and all(
+        number(row, "prompt_tokens", "input_tokens") is not None
+        and number(row, "completion_tokens", "output_tokens") is not None
+        for row in rows
+    )
+    if not complete:
+        return len(rows), "unknown", None, None, None
+    prompt = sum(number(row, "prompt_tokens", "input_tokens") for row in rows)
+    completion = sum(number(row, "completion_tokens", "output_tokens") for row in rows)
+    total = sum(number(row, "total_tokens", "total_tokens") or (
+        number(row, "prompt_tokens", "input_tokens") + number(row, "completion_tokens", "output_tokens")
+    ) for row in rows)
+    return len(rows), "reported", prompt, completion, total
+
+
 def main():
     client = OpenAICompatibleClient(ModelConfig.from_env())
     run_id = "real_two_phase_" + uuid4().hex[:8]
@@ -137,14 +157,7 @@ def main():
     duration = time.perf_counter() - started
     state = report.state
     records = [record for record in state.evidence_records if record.get("call_type") == "model_call"]
-    usage_rows = [record.get("usage") for record in records]
-    usage_complete = bool(usage_rows) and all(isinstance(row, dict) and row for row in usage_rows)
-    if usage_complete:
-        prompt_tokens = sum(int(row.get("prompt_tokens", row.get("input_tokens", 0))) for row in usage_rows)
-        completion_tokens = sum(int(row.get("completion_tokens", row.get("output_tokens", 0))) for row in usage_rows)
-        total_tokens = sum(int(row.get("total_tokens", int(row.get("prompt_tokens", row.get("input_tokens", 0))) + int(row.get("completion_tokens", row.get("output_tokens", 0))))) for row in usage_rows)
-    else:
-        prompt_tokens = completion_tokens = total_tokens = None
+    model_call_count, usage_status, prompt_tokens, completion_tokens, total_tokens = aggregate_model_usage(records)
     try:
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parent, check=True,
                                 capture_output=True, text=True).stdout.strip()
@@ -176,8 +189,9 @@ def main():
         "status": state.status,
         "phase_count": state.phase,
         "duration_seconds": round(duration, 3),
-        "model_call_count": len(records),
-        "token_usage_status": "reported" if usage_complete else "unknown",
+        "command": "python run_real_two_phase_demo.py",
+        "model_call_count": model_call_count,
+        "token_usage_status": usage_status,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,

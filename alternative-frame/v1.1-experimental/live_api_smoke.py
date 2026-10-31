@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import argparse
+from urllib.parse import urlsplit
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,6 +30,7 @@ def main():
         'timestamp_utc': datetime.now(timezone.utc).isoformat(),
         'test_type': 'real_api_connectivity_smoke',
         'model': config.model,
+        'endpoint_redacted': f'{urlsplit(config.base_url).scheme}://{urlsplit(config.base_url).hostname}' if urlsplit(config.base_url).hostname else 'unknown',
         'real_api': True,
         'note': 'Connectivity only; not a multi-Agent performance benchmark.',
     }

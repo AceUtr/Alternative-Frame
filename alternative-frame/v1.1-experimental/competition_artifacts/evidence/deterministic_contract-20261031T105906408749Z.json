@@ -1,0 +1,44 @@
+{
+  "experiment": "deterministic_contract_ablation",
+  "evidence_kind": "deterministic_controlled_run",
+  "generated_at": "2026-10-31T10:59:06.408794+00:00",
+  "provenance": {
+    "run_id": "deterministic_contract-20261031T105906408749Z",
+    "candidate_tag": "v1.1.0-competition-candidate",
+    "candidate_commit": "1d89c60230598746ef73b3475169efea6c12acbb",
+    "command": "python run_deterministic_contract_ablation.py --config benchmarks/configs/deterministic_contract.json",
+    "config_path": "benchmarks\\configs\\deterministic_contract.json",
+    "config_sha256": "c56295042af2ef3811c16fd9f34409efaebd293bc0390ccf090a32a648b5bf6f"
+  },
+  "results": [
+    {
+      "mode": "contract_off",
+      "completed": true,
+      "reason": "all phase tasks and their acceptance checks passed",
+      "satisfied_criteria": [],
+      "missing_criteria": [],
+      "failures": [],
+      "phase_report_status": "success",
+      "evidence_kind": "deterministic_controlled_run",
+      "run_id": "deterministic_contract-20261031T105906408749Z-contract_off"
+    },
+    {
+      "mode": "contract_on",
+      "completed": false,
+      "reason": "deterministic contract acceptance gates did not pass",
+      "satisfied_criteria": [
+        "source",
+        "tests"
+      ],
+      "missing_criteria": [
+        "final_evidence"
+      ],
+      "failures": [
+        "final_evidence: missing required output: FINAL_EVIDENCE.md"
+      ],
+      "phase_report_status": "success",
+      "evidence_kind": "deterministic_controlled_run",
+      "run_id": "deterministic_contract-20261031T105906408749Z-contract_on"
+    }
+  ]
+}

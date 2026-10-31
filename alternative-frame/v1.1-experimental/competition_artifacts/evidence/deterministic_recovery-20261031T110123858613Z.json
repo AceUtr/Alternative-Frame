@@ -1,0 +1,59 @@
+{
+  "experiment": "deterministic_local_recovery",
+  "evidence_kind": "deterministic_controlled_run",
+  "generated_at": "2026-10-31T11:01:23.858658+00:00",
+  "provenance": {
+    "run_id": "deterministic_recovery-20261031T110123858613Z",
+    "candidate_tag": null,
+    "candidate_commit": "d19a5e102256f37f07786a730295f3182ff33c02",
+    "command": "python run_deterministic_recovery_ablation.py --config benchmarks/configs/deterministic_recovery.json",
+    "config_path": "benchmarks\\configs\\deterministic_recovery.json",
+    "config_sha256": "f94aef7a9c41178de7c4cc918f917aa0c2002f66b8cee706e2383480508f1950"
+  },
+  "results": [
+    {
+      "mode": "recovery_off",
+      "status": "failed",
+      "goal_completed": false,
+      "original_task_count": 3,
+      "final_success_count": 1,
+      "final_failed_count": 2,
+      "local_recovery_count": 0,
+      "executed_task_count": 2,
+      "extra_executions": 0,
+      "prepare_attempts": 1,
+      "compute_attempts": 1,
+      "verify_attempts": 0,
+      "execution_log": [
+        "prepare",
+        "compute"
+      ],
+      "frozen_prepare": true,
+      "evidence_kind": "deterministic_controlled_run",
+      "run_id": "deterministic_recovery-20261031T110123858613Z-recovery_off"
+    },
+    {
+      "mode": "recovery_on",
+      "status": "success",
+      "goal_completed": true,
+      "original_task_count": 3,
+      "final_success_count": 3,
+      "final_failed_count": 0,
+      "local_recovery_count": 1,
+      "executed_task_count": 5,
+      "extra_executions": 1,
+      "prepare_attempts": 1,
+      "compute_attempts": 2,
+      "verify_attempts": 1,
+      "execution_log": [
+        "prepare",
+        "compute",
+        "compute",
+        "verify"
+      ],
+      "frozen_prepare": true,
+      "evidence_kind": "deterministic_controlled_run",
+      "run_id": "deterministic_recovery-20261031T110123858613Z-recovery_on"
+    }
+  ]
+}

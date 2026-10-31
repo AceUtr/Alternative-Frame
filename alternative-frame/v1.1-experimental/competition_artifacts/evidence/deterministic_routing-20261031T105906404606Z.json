@@ -1,0 +1,177 @@
+{
+  "experiment": "deterministic_routing_ablation",
+  "evidence_kind": "deterministic_controlled_run",
+  "generated_at": "2026-10-31T10:59:06.404653+00:00",
+  "provenance": {
+    "run_id": "deterministic_routing-20261031T105906404606Z",
+    "candidate_tag": "v1.1.0-competition-candidate",
+    "candidate_commit": "1d89c60230598746ef73b3475169efea6c12acbb",
+    "command": "python run_deterministic_routing_ablation.py --config benchmarks/configs/deterministic_routing.json",
+    "config_path": "benchmarks\\configs\\deterministic_routing.json",
+    "config_sha256": "b6a20c439158b09589b04101f649b79f102ea9007093bf84d377b74d56f4ed69"
+  },
+  "results": [
+    {
+      "mode": "fixed_cloud",
+      "completed": false,
+      "selected_node": "cloud-1",
+      "final_node_type": "cloud",
+      "fallback_count": 0,
+      "execution_attempts": 1,
+      "failed_attempts": 1,
+      "device_attempts": 0,
+      "edge_attempts": 0,
+      "cloud_attempts": 1,
+      "estimated_latency_ms": 45,
+      "estimated_cost": 0.8,
+      "actual_duration_seconds": 1.2e-05,
+      "tool_records": [
+        {
+          "node": "cloud",
+          "node_type": "cloud",
+          "node_id": "cloud-1",
+          "success": false,
+          "estimated_latency_ms": 45,
+          "estimated_cost": 0.8,
+          "fallback_count": 0,
+          "error": "NodeExecutionError: injected cloud outage"
+        }
+      ],
+      "evidence_kind": "deterministic_controlled_run",
+      "run_id": "deterministic_routing-20261031T105906404606Z-fixed_cloud"
+    },
+    {
+      "mode": "dynamic_routing",
+      "completed": true,
+      "selected_node": "edge-1",
+      "final_node_type": "edge",
+      "fallback_count": 1,
+      "execution_attempts": 2,
+      "failed_attempts": 1,
+      "device_attempts": 0,
+      "edge_attempts": 1,
+      "cloud_attempts": 1,
+      "estimated_latency_ms": 12,
+      "estimated_cost": 0.2,
+      "actual_duration_seconds": 4e-06,
+      "tool_records": [
+        {
+          "schema_version": "1.0",
+          "tool": "runtime_executor",
+          "call_type": "node_execution",
+          "task_id": "high-compute",
+          "success": false,
+          "node": "cloud",
+          "node_id": "cloud-1",
+          "node_type": "cloud",
+          "deployment_target": "cloud",
+          "placement_reason": "all hard constraints satisfied; matches preferred tier cloud; estimated latency=45ms cost=0.8",
+          "estimated_latency_ms": 45,
+          "estimated_cost": 0.8,
+          "actual_duration_ms": 0.003,
+          "duration": 3e-06,
+          "duration_seconds": 3e-06,
+          "fallback_count": 0,
+          "output_excerpt": "",
+          "error": "NodeExecutionError: injected cloud outage",
+          "failure_kind": "node_execution_error",
+          "metadata": {
+            "deployment_target": "cloud",
+            "privacy_level": "public",
+            "placement": {
+              "node_id": "cloud-1",
+              "node_type": "cloud",
+              "score": 158.35249,
+              "placement_reason": "all hard constraints satisfied; matches preferred tier cloud; estimated latency=45ms cost=0.8",
+              "rejected_nodes": {},
+              "ranked_node_ids": [
+                "cloud-1",
+                "edge-1",
+                "device-1"
+              ],
+              "candidate_scores": {
+                "cloud-1": 158.35249,
+                "edge-1": 138.988095,
+                "device-1": 138.518519
+              },
+              "candidate_reasons": {
+                "cloud-1": [
+                  "all hard constraints satisfied",
+                  "matches preferred tier cloud",
+                  "estimated latency=45ms cost=0.8"
+                ],
+                "edge-1": [
+                  "all hard constraints satisfied",
+                  "estimated latency=12ms cost=0.2"
+                ],
+                "device-1": [
+                  "all hard constraints satisfied",
+                  "estimated latency=35ms cost=0"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "schema_version": "1.0",
+          "tool": "runtime_executor",
+          "call_type": "node_execution",
+          "task_id": "high-compute",
+          "success": true,
+          "node": "edge",
+          "node_id": "edge-1",
+          "node_type": "edge",
+          "deployment_target": "edge",
+          "placement_reason": "fallback candidate after 1 failed attempt(s); all hard constraints satisfied; estimated latency=12ms cost=0.2",
+          "estimated_latency_ms": 12,
+          "estimated_cost": 0.2,
+          "actual_duration_ms": 0.001,
+          "duration": 1e-06,
+          "duration_seconds": 1e-06,
+          "fallback_count": 1,
+          "output_excerpt": "completed on edge-1",
+          "error": "",
+          "failure_kind": "",
+          "metadata": {
+            "deployment_target": "edge",
+            "privacy_level": "public",
+            "placement": {
+              "node_id": "cloud-1",
+              "node_type": "cloud",
+              "score": 158.35249,
+              "placement_reason": "all hard constraints satisfied; matches preferred tier cloud; estimated latency=45ms cost=0.8",
+              "rejected_nodes": {},
+              "ranked_node_ids": [
+                "cloud-1",
+                "edge-1",
+                "device-1"
+              ],
+              "candidate_scores": {
+                "cloud-1": 158.35249,
+                "edge-1": 138.988095,
+                "device-1": 138.518519
+              },
+              "candidate_reasons": {
+                "cloud-1": [
+                  "all hard constraints satisfied",
+                  "matches preferred tier cloud",
+                  "estimated latency=45ms cost=0.8"
+                ],
+                "edge-1": [
+                  "all hard constraints satisfied",
+                  "estimated latency=12ms cost=0.2"
+                ],
+                "device-1": [
+                  "all hard constraints satisfied",
+                  "estimated latency=35ms cost=0"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "evidence_kind": "deterministic_controlled_run",
+      "run_id": "deterministic_routing-20261031T105906404606Z-dynamic_routing"
+    }
+  ]
+}

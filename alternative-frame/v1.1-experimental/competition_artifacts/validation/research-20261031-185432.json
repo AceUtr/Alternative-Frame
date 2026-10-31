@@ -1,0 +1,59 @@
+{
+  "target": "research",
+  "manifest": "validation/manifests/research.json",
+  "status": "passed",
+  "started_at": "2026-10-31T10:54:26.683276+00:00",
+  "finished_at": "2026-10-31T10:54:32.799048+00:00",
+  "checks": [
+    {
+      "name": "required_files",
+      "category": "structure",
+      "status": "passed",
+      "detail": "all 6 required files exist",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "import:domains.research_demo",
+      "category": "import",
+      "status": "passed",
+      "detail": "imported domains.research_demo",
+      "duration_seconds": 0.018815599993104115
+    },
+    {
+      "name": "symbols:domains.research_demo",
+      "category": "interface",
+      "status": "passed",
+      "detail": "found 1 required symbols",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "domain_adapter_preflight",
+      "category": "preflight",
+      "status": "passed",
+      "detail": "adapter=research; roles=2; tools=5; tasks=6",
+      "duration_seconds": 0.008871500001987442
+    },
+    {
+      "name": "sensitive_data_scan",
+      "category": "security",
+      "status": "passed",
+      "detail": "no credential or personal-path patterns found",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "tests:1",
+      "category": "tests",
+      "status": "passed",
+      "detail": "exit_code=0; command=python -m pytest tests/test_research_demo.py -q -p no:cacheprovider; output=.................... [100%] 20 passed in 5.04s",
+      "duration_seconds": 5.4318973000044934
+    },
+    {
+      "name": "smoke:1",
+      "category": "smoke",
+      "status": "passed",
+      "detail": "exit_code=0; command=python run_research_demo.py; output=domain=research run_id=research_7bd464f7 status=completed phases=2 fault_scenario=normal local_recovery_cycles=0 metrics=examples/research_task/artifacts/baseline_metrics.json published_artifacts=[PERSONAL_PATH]\\Documents\\plan a project\\.final-v11-integration\\alternative-frame\\v1.1-experimental\\runs\\outputs\\research\\research_7bd464f7",
+      "duration_seconds": 0.6373495000007097
+    }
+  ],
+  "report_path": "reports/contribution-validation/research-20261031-185432.json"
+}

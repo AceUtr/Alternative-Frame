@@ -1,0 +1,59 @@
+{
+  "target": "software",
+  "manifest": "validation/manifests/software.json",
+  "status": "passed",
+  "started_at": "2026-10-31T10:54:26.681353+00:00",
+  "finished_at": "2026-10-31T10:54:33.086519+00:00",
+  "checks": [
+    {
+      "name": "required_files",
+      "category": "structure",
+      "status": "passed",
+      "detail": "all 9 required files exist",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "import:domains.software_demo",
+      "category": "import",
+      "status": "passed",
+      "detail": "imported domains.software_demo",
+      "duration_seconds": 0.012767400010488927
+    },
+    {
+      "name": "symbols:domains.software_demo",
+      "category": "interface",
+      "status": "passed",
+      "detail": "found 1 required symbols",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "domain_adapter_preflight",
+      "category": "preflight",
+      "status": "passed",
+      "detail": "adapter=software; roles=4; tools=4; tasks=1",
+      "duration_seconds": 0.00641540001379326
+    },
+    {
+      "name": "sensitive_data_scan",
+      "category": "security",
+      "status": "passed",
+      "detail": "no credential or personal-path patterns found",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "tests:1",
+      "category": "tests",
+      "status": "passed",
+      "detail": "exit_code=0; command=python -m pytest tests/test_software_demo.py -q -p no:cacheprovider; output=...... [100%] 6 passed in 2.09s",
+      "duration_seconds": 2.4844946999801323
+    },
+    {
+      "name": "smoke:1",
+      "category": "smoke",
+      "status": "passed",
+      "detail": "exit_code=0; command=python validation/software_smoke.py; output=none: completed; runtime_root=[PERSONAL_PATH]\\AppData\\Local\\Temp\\alternative-frame-v1.1-software-smoke-gdq0cpg6\\none-20261031-105429-447055 retry-once: completed; runtime_root=[PERSONAL_PATH]\\AppData\\Local\\Temp\\alternative-frame-v1.1-software-smoke-gdq0cpg6\\retry-once-20261031-105430-563558 local-recovery: completed; runtime_root=[PERSONAL_PATH]\\AppData\\Local\\Temp\\alternative-frame-v1.1-software-smoke-gdq0cpg6\\local-recovery-20261031-105431-748639",
+      "duration_seconds": 3.8952753999910783
+    }
+  ],
+  "report_path": "reports/contribution-validation/software-20261031-185433.json"
+}

@@ -24,7 +24,8 @@ def main() -> int:
     package = manifest_path.parent
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     errors = []
-    for entry in payload.get("sources", []) + payload.get("charts", []):
+    entries = payload.get("sources", []) + payload.get("charts", []) + payload.get("validations", []) + payload.get("configurations", []) + payload.get("documents", [])
+    for entry in entries:
         path = package / entry["path"]
         if not path.is_file():
             errors.append(f"missing: {entry['path']}")
@@ -40,6 +41,7 @@ def main() -> int:
         return 1
     print(f"[PASS] {len(payload.get('sources', []))} sources and {len(payload.get('charts', []))} charts verified")
     print(f"candidate_commit={payload.get('candidate_commit')}")
+    print(f"evidence_commit={payload.get('evidence_commit')}")
     print(f"live_api_status={payload.get('live_api_status')}")
     return 0
 

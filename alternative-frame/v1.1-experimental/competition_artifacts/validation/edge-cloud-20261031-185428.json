@@ -1,0 +1,73 @@
+{
+  "target": "edge-cloud",
+  "manifest": "validation/manifests/edge-cloud.json",
+  "status": "passed",
+  "started_at": "2026-10-31T10:54:26.684315+00:00",
+  "finished_at": "2026-10-31T10:54:28.178769+00:00",
+  "checks": [
+    {
+      "name": "required_files",
+      "category": "structure",
+      "status": "passed",
+      "detail": "all 18 required files exist",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "import:core.runtime_nodes",
+      "category": "import",
+      "status": "passed",
+      "detail": "imported core.runtime_nodes",
+      "duration_seconds": 0.02256510002189316
+    },
+    {
+      "name": "import:core.routing",
+      "category": "import",
+      "status": "passed",
+      "detail": "imported core.routing",
+      "duration_seconds": 4.089999129064381e-05
+    },
+    {
+      "name": "symbols:core.runtime_nodes",
+      "category": "interface",
+      "status": "passed",
+      "detail": "found 11 required symbols",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "symbols:core.routing",
+      "category": "interface",
+      "status": "passed",
+      "detail": "found 3 required symbols",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "domain_adapter",
+      "category": "interface",
+      "status": "skipped",
+      "detail": "not required for this contribution",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "sensitive_data_scan",
+      "category": "security",
+      "status": "passed",
+      "detail": "no credential or personal-path patterns found",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "tests:1",
+      "category": "tests",
+      "status": "passed",
+      "detail": "exit_code=0; command=python -m pytest tests/test_node_routing.py tests/test_runtime_fallback.py tests/test_runtime_dynamic_state.py tests/test_edge_cloud_long_horizon.py tests/test_edge_cloud_replan_resume.py tests/test_runtime_contract.py -q -p no:cacheprovider; output=.................................. [100%] 34 passed in 0.78s",
+      "duration_seconds": 1.1834764999803156
+    },
+    {
+      "name": "smoke:1",
+      "category": "smoke",
+      "status": "passed",
+      "detail": "exit_code=0; command=python run_edge_cloud_replan_demo.py; output=phase1_missing=['high_compute_artifact', 'cloud_edge_fallback_evidence', 'post_resume_task_completed', 'final_report_exists'] paused_phase=2 final_status=completed run_dir=[PERSONAL_PATH]\\Documents\\plan a project\\.final-v11-integration\\alternative-frame\\v1.1-experimental\\runs\\edge_cloud_replan\\replan_6b3a0b54 { \"schema_version\": \"1.0\", \"node_distribution\": { \"device\": 1, \"edge\": 2, \"cloud\": 1, \"unknown\": 0 }, \"node_duration_seconds\": { \"device\": 0.001183, \"edge\": 0.000951, \"cloud\": 0.000468, \"unknown\": 0.0 }, \"node_failure_count\": { \"device\": 0, \"edge\": 0, \"cloud\": 1, \"unknown\": 0 }, \"fallback_count\": 1, \"execution_attempt_count\": 5, \"no_eligible_node_count\": 0 }",
+      "duration_seconds": 0.273652600008063
+    }
+  ],
+  "report_path": "reports/contribution-validation/edge-cloud-20261031-185428.json"
+}
