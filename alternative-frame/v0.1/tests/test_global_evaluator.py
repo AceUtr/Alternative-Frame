@@ -10,7 +10,6 @@ from core.long_horizon import (
     EvidenceBundle,
     GoalEvaluation,
     GoalCriterion,
-    GoalEvaluation,
     HardEvidenceGate,
     LongHorizonController,
     LongHorizonState,
