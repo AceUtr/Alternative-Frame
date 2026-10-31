@@ -52,7 +52,8 @@ def test_competition_package_uses_explicit_inputs_and_verifies_hashes(tmp_path, 
     assert build_main() == 0
 
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["candidate_commit"] == "abc123"
+    assert manifest["candidate_commit"] == "1d89c60230598746ef73b3475169efea6c12acbb"
+    assert manifest["evidence_commit"] == "abc123"
     assert manifest["live_api_status"] == "pending_credentials"
     assert len(manifest["sources"]) == 5
     assert len(manifest["charts"]) == 5
