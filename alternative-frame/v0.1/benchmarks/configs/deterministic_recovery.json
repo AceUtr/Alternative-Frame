@@ -1,0 +1,7 @@
+﻿{
+  "name": "deterministic_local_recovery",
+  "description": "Controlled deterministic DAG failure experiment without model API.",
+  "evidence_kind": "deterministic_controlled_run",
+  "modes": ["recovery_off", "recovery_on"],
+  "task_budget": 10
+}

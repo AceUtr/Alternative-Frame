@@ -1,0 +1,35 @@
+{
+  "experiment": "deterministic_contract_ablation",
+  "evidence_kind": "deterministic_controlled_run",
+  "generated_at": "2026-08-14T05:24:09.877830+00:00",
+  "results": [
+    {
+      "mode": "contract_off",
+      "completed": true,
+      "reason": "all phase tasks and their acceptance checks passed",
+      "satisfied_criteria": [],
+      "missing_criteria": [],
+      "failures": [],
+      "phase_report_status": "success",
+      "evidence_kind": "deterministic_controlled_run"
+    },
+    {
+      "mode": "contract_on",
+      "completed": false,
+      "reason": "deterministic contract acceptance gates did not pass",
+      "satisfied_criteria": [],
+      "missing_criteria": [
+        "source",
+        "tests",
+        "final_evidence"
+      ],
+      "failures": [
+        "source: output exists but has no artifact provenance in this run: calculator.py",
+        "tests: no successful exit-code-0 evidence for exact command: python -m unittest -v test_calculator.py",
+        "final_evidence: missing required output: FINAL_EVIDENCE.md"
+      ],
+      "phase_report_status": "success",
+      "evidence_kind": "deterministic_controlled_run"
+    }
+  ]
+}

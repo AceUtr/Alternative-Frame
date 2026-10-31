@@ -1,0 +1,7 @@
+﻿experiment,case,evidence_kind,goal_completed,status,task_count,success_count,first_pass_count,local_recovery_count,phase_count,extra_planned_tasks,false_completion_detected,missing_criteria,duration_seconds
+recorded_research,research_normal,recorded_real_run,True,completed,8,8,8,0,2,0,,,0.43573
+recorded_research,research_local_recovery,recorded_real_run,True,completed,11,8,7,1,2,3,,,0.505034
+local_recovery_ablation,recovery_off,deterministic_controlled_run,False,failed,3,1,,0,1,0,,,
+local_recovery_ablation,recovery_on,deterministic_controlled_run,True,success,3,3,,1,1,1,,,
+contract_ablation,contract_off,deterministic_controlled_run,True,success,,,,0,1,0,False,,
+contract_ablation,contract_on,deterministic_controlled_run,False,success,,,,0,1,0,True,final_evidence,

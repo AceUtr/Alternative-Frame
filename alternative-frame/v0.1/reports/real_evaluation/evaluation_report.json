@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-08-14T05:03:24.465591+00:00",
+  "evidence_kind": "recorded_real_run",
+  "source_summary": "benchmarks\\results\\summary\\research_recorded-20260814T045729288642Z.json",
+  "runs": [
+    {
+      "case": "research_normal",
+      "run_id": "research-normal-20260812",
+      "evidence_kind": "recorded_real_run",
+      "goal_completed": true,
+      "completed_tasks": 8,
+      "cumulative_planned_tasks": 8,
+      "extra_planned_tasks": 0,
+      "first_pass_count": 8,
+      "retry_count": 0,
+      "local_recovery_count": 0,
+      "phase_count": 2,
+      "additional_phase_count": 1,
+      "contract_first_phase_pass": false,
+      "final_contract_pass": true,
+      "duration_seconds": 0.43573,
+      "tool_calls": 8,
+      "successful_tool_calls": 8,
+      "tool_success_rate": 1.0,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "total_tokens": null,
+      "estimated_cost": null
+    },
+    {
+      "case": "research_local_recovery",
+      "run_id": "research-local-recovery-20260812",
+      "evidence_kind": "recorded_real_run",
+      "goal_completed": true,
+      "completed_tasks": 8,
+      "cumulative_planned_tasks": 11,
+      "extra_planned_tasks": 3,
+      "first_pass_count": 7,
+      "retry_count": 0,
+      "local_recovery_count": 1,
+      "phase_count": 2,
+      "additional_phase_count": 1,
+      "contract_first_phase_pass": false,
+      "final_contract_pass": true,
+      "duration_seconds": 0.505034,
+      "tool_calls": 8,
+      "successful_tool_calls": 8,
+      "tool_success_rate": 1.0,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "total_tokens": null,
+      "estimated_cost": null
+    }
+  ],
+  "figures": [
+    "reports\\real_evaluation\\figures\\goal_completion.png",
+    "reports\\real_evaluation\\figures\\first_pass_count.png",
+    "reports\\real_evaluation\\figures\\recovery_overhead.png",
+    "reports\\real_evaluation\\figures\\duration_seconds.png"
+  ]
+}

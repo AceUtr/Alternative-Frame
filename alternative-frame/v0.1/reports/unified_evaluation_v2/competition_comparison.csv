@@ -1,0 +1,7 @@
+﻿experiment,condition,evidence_kind,goal_completion_rate,mean_duration_seconds,parallel_overlap_seconds,unique_backend_count,key_result
+agent_topology,single_agent,deterministic_controlled_run,1.0,0.40476392000127814,0.0,1,single shared backend
+agent_topology,multi_agent,deterministic_controlled_run,1.0,0.32441089999920225,0.08025545999989844,5,1.248x wall-clock speedup
+local_recovery,recovery_off,deterministic_controlled_run,0,,,,injected failure remained failed
+local_recovery,recovery_on,deterministic_controlled_run,1,,,,one local recovery cycle restored success
+contract_validation,contract_off,deterministic_controlled_run,1,,,,false completion accepted
+contract_validation,contract_on,deterministic_controlled_run,0,,,,missing final_evidence correctly rejected
