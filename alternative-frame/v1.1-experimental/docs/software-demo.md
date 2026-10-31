@@ -17,17 +17,33 @@ no network, API key, or GPU and runs on the existing Alternative-Frame Harness.
 
 ## Run
 
-From `alternative-frame/v0.1`:
+From `alternative-frame/v1.1-experimental`:
 
 ```powershell
-python run_software_demo.py
-python -m pytest tests/test_software_demo.py -q -p no:cacheprovider
-python validate_contribution.py --domain software
+python run_software_demo.py --fault-scenario none
+python run_software_demo.py --fault-scenario retry-once
+python run_software_demo.py --fault-scenario local-recovery
 ```
 
-Expected smoke output includes `status=completed` and `phases=2`. Persistent
-state and events are written below `runs/software/<run_id>/`; the resettable
-fixture is isolated below `runs/software-workspaces/<run_id>/`.
+Each run creates an isolated runtime directory containing `state.json`,
+`events.jsonl`, `run_manifest.json`, and the key artifacts under
+`workspace/artifacts/`. The manifest binds the run ID, scenario, exact test
+command, real exit codes, and artifact paths for evaluation.
+
+The `retry-once` scenario records a structured retry event after the first
+deliberately incorrect AST repair. The `local-recovery` scenario records the
+frozen nodes and impacted subgraph after one injected downstream failure.
+
+## Validation
+
+```powershell
+python -m pytest tests/test_software_demo.py -q -p no:cacheprovider
+python validate_contribution.py --domain software
+python validation/software_smoke.py
+```
+
+Generated `reports/` and `runs/` output is for local inspection and must not be
+committed.
 
 ## Scope
 

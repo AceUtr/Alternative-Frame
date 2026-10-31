@@ -151,16 +151,35 @@ class SoftwareExecutionAgent(Agent):
             else:
                 failures.append(written.error)
         elif action == "repair":
-            args = {"path": "app.py", "function": "add", "operator": "add"}
+            operator = "add"
+            if (
+                task.metadata.get("fault_scenario") == "retry-once"
+                and int(task.metadata.get("runtime_attempt", 1)) == 1
+            ):
+                operator = "multiply"
+            args = {"path": "app.py", "function": "add", "operator": operator}
             result = self.tools.execute("python_ast_repair", args)
             records.append(_record(result, args))
             artifacts.extend(result.metadata.get("artifacts", []))
             evidence.append(result.output or result.error)
+            if (
+                task.metadata.get("fault_scenario") == "retry-once"
+                and int(task.metadata.get("runtime_attempt", 1)) == 1
+            ):
+                failures.append("controlled retry-once repair failure")
             if not result.success:
                 failures.append(result.error)
         elif action == "verify":
             args = {"command": EXACT_TEST_COMMAND}
             result = self.tools.execute("test_runner", args)
+            if task.metadata.get("fault_scenario") == "local-recovery":
+                workspace = self.tools._tools["file_editor"].workspace
+                marker = workspace / ".local-recovery-injected"
+                if not marker.exists():
+                    marker.write_text("injected once\n", encoding="utf-8")
+                    result.success = False
+                    result.exit_code = 1
+                    result.error = "controlled local-recovery failure injected once"
             records.append(_record(result, args))
             evidence.append(f"exact_test_exit_code={result.exit_code}")
             if not result.success:
@@ -183,6 +202,23 @@ class SoftwareExecutionAgent(Agent):
             result = self.tools.execute("file_editor", args)
             records.append(_record(result, args))
             if result.success:
+                for relative, content in (
+                    (
+                        "artifacts/code_diff.patch",
+                        "--- a/app.py\n+++ b/app.py\n@@\n-    return a - b\n+    return a + b\n",
+                    ),
+                    (
+                        "artifacts/test_log.txt",
+                        test_record.get("output_excerpt", ""),
+                    ),
+                ):
+                    write_args = {"action": "write", "path": relative, "content": content}
+                    written = self.tools.execute("file_editor", write_args)
+                    records.append(_record(written, write_args))
+                    if written.success:
+                        artifacts.append(relative)
+                    else:
+                        failures.append(written.error)
                 artifacts.append("artifacts/software_report.md")
             else:
                 failures.append(result.error)
@@ -211,7 +247,7 @@ class SoftwareDomainAdapter(DomainAdapter):
     def build_agents(self, model_client, tools: ToolRegistry):
         return [SoftwareExecutionAgent(role, tools) for role in ("analyst", "developer", "tester", "reporter")]
 
-    def build_plan(self, goal: str) -> Plan:
+    def build_plan(self, goal: str, fault_scenario: str = "none") -> Plan:
         return Plan(goal, [SubTask(
             "diagnose_failure", "analyst", "Read the fixture and prove the baseline failure", max_retries=0,
             metadata={"action": "diagnose", "required_tools": ["file_editor", "test_runner"],
@@ -219,19 +255,46 @@ class SoftwareDomainAdapter(DomainAdapter):
                       "checks": [{"id": "diagnosis", "check_type": "file_exists"}]},
         )], final_acceptance=[criterion.id for criterion in self.build_contract(goal).criteria])
 
-    def build_recovery_plan(self, goal: str, missing_criteria: list[str] | None = None) -> Plan:
+    def build_recovery_plan(
+        self,
+        goal: str,
+        missing_criteria: list[str] | None = None,
+        fault_scenario: str = "none",
+    ) -> Plan:
         return Plan(goal, [
-            SubTask("implement_fix", "developer", "Apply the diagnosed repair through a workspace-scoped AST tool", max_retries=0,
+            SubTask("implement_fix", "developer", "Apply the diagnosed repair through a workspace-scoped AST tool", max_retries=1,
                     metadata={"action": "repair", "required_tools": ["python_ast_repair"], "expected_outputs": ["app.py"],
+                              "fault_scenario": fault_scenario,
                               "checks": [{"id": "source", "check_type": "file_exists"}]}),
             SubTask("verify_fix", "tester", "Run the exact contracted regression command", depends_on=["implement_fix"], max_retries=0,
                     metadata={"action": "verify", "required_tools": ["test_runner"], "expected_outputs": [],
+                              "fault_scenario": fault_scenario,
                               "checks": [{"id": "tests", "check_type": "command", "command": EXACT_TEST_COMMAND}]}),
             SubTask("write_report", "reporter", "Build a report from the real test tool record", depends_on=["verify_fix"], max_retries=0,
                     metadata={"action": "report", "required_tools": ["file_editor"],
-                              "expected_outputs": ["artifacts/software_report.md"],
+                              "expected_outputs": [
+                                  "artifacts/software_report.md",
+                                  "artifacts/code_diff.patch",
+                                  "artifacts/test_log.txt",
+                              ],
                               "checks": [{"id": "report", "check_type": "file_exists"}]}),
         ], final_acceptance=[criterion.id for criterion in self.build_contract(goal).criteria])
+
+    def build_full_plan(self, goal: str, fault_scenario: str = "none") -> Plan:
+        diagnosis = self.build_plan(goal).subtasks[0]
+        recovery = self.build_recovery_plan(goal, fault_scenario=fault_scenario).subtasks
+        for task in recovery:
+            if task.id == "implement_fix":
+                task.depends_on = ["diagnose_failure"]
+            elif task.id == "verify_fix":
+                task.depends_on = ["implement_fix"]
+            elif task.id == "write_report":
+                task.depends_on = ["verify_fix"]
+        return Plan(
+            goal,
+            [diagnosis, *recovery],
+            final_acceptance=[criterion.id for criterion in self.build_contract(goal).criteria],
+        )
 
     def build_contract(self, goal: str) -> AcceptanceContract:
         return AcceptanceContract(goal, [
