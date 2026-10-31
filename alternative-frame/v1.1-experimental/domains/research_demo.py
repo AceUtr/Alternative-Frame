@@ -15,7 +15,10 @@ from core.long_horizon import AcceptanceContract, GoalCriterion
 from core.models import AgentResult, Plan, SubTask, utc_now
 from core.tools import ExperimentRunner, ShellRunner, ToolRegistry
 
-from .research_tools import DatasetInspector, MetricComparator, ResearchReportBuilder
+from .research_tools import (
+    DatasetInspector, MetricComparator, ResearchReportBuilder, ResearchDiscoveryTool,
+)
+from .research_tools.discovery_tool import DISCOVERY_PATHS
 
 
 GENERATOR_COMMAND = "python generate_dataset.py --output data/dataset.json"
@@ -157,6 +160,7 @@ class ResearchDomainAdapter(DomainAdapter):
         "artifacts/verification_metrics.json",
         "artifacts/comparison.png",
         "artifacts/research_report.md",
+        *DISCOVERY_PATHS.values(),
     )
 
     def register_tools(self, registry: ToolRegistry, workspace: Path) -> None:
@@ -164,6 +168,7 @@ class ResearchDomainAdapter(DomainAdapter):
         shell = ShellRunner(workspace, timeout_seconds=120)
         registry.register(ExperimentRunner(shell))
         registry.register(DatasetInspector(workspace))
+        registry.register(ResearchDiscoveryTool(workspace))
         registry.register(MetricComparator(workspace))
         registry.register(ResearchReportBuilder(workspace))
 
@@ -200,22 +205,26 @@ class ResearchDomainAdapter(DomainAdapter):
             SubTask(
                 id="inspect_dataset",
                 role="research_data",
-                description="Validate dataset schema, split and label distribution.",
+                description="Inspect data, generate hypotheses, rank candidates and build a protocol.",
                 depends_on=["generate_dataset"],
-                max_retries=0,
+                max_retries=1,
                 metadata={
-                    "required_tools": ["dataset_inspector"],
-                    "expected_outputs": ["artifacts/dataset_summary.json"],
+                    "required_tools": ["research_discovery"],
+                    "expected_outputs": ["artifacts/dataset_summary.json", *DISCOVERY_PATHS.values()],
                     "checks": [
                         {
                             "id": "dataset_summary",
                             "check_type": "file_exists",
                             "path": "artifacts/dataset_summary.json",
-                        }
+                        },
+                        *[
+                            {"id": f"research_{name}", "check_type": "file_exists", "path": path}
+                            for name, path in DISCOVERY_PATHS.items()
+                        ],
                     ],
-                    "contract_criteria": ["dataset_summary"],
+                    "contract_criteria": ["dataset_summary", *[f"research_{n}" for n in DISCOVERY_PATHS]],
                     "execution": {
-                        "tool": "dataset_inspector",
+                        "tool": "research_discovery",
                         "arguments": {
                             "dataset_path": "data/dataset.json",
                             "output_path": "artifacts/dataset_summary.json",
@@ -375,6 +384,7 @@ class ResearchDomainAdapter(DomainAdapter):
             final_acceptance=[
                 "dataset_generated",
                 "dataset_summary",
+                *[f"research_{name}" for name in DISCOVERY_PATHS],
                 "baseline_metrics",
                 "baseline_accuracy",
                 "improved_metrics",
@@ -391,6 +401,11 @@ class ResearchDomainAdapter(DomainAdapter):
             goal=goal,
             goal_summary="Generate, inspect and execute a reproducible offline baseline",
             criteria=[
+                *[
+                    GoalCriterion(f"research_{name}", f"Structured research {name} exists",
+                                  "file_exists", path=path)
+                    for name, path in DISCOVERY_PATHS.items()
+                ],
                 GoalCriterion(
                     "dataset_generated",
                     "Fixed dataset exists with run provenance",
