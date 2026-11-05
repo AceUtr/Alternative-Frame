@@ -7,6 +7,8 @@ import os
 import queue
 import threading
 import tkinter as tk
+from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Dict
@@ -17,6 +19,7 @@ from core.domains import DomainAdapter, DomainRegistry
 from core.local_recovery import LocalDAGRecoveryController
 from core.long_horizon import (
     AcceptanceContract,
+    GoalCriterion,
     RuleBasedContractPlanner,
     ContractValidator,
     LongHorizonController,
@@ -39,9 +42,11 @@ from core.orchestrator import Orchestrator, RunReport
 from core.planning import PlanningPipeline
 from core.preflight import HarnessPreflightChecker
 from core.tools import ExperimentRunner, FileEditor, GitClient, ShellRunner, TestRunner, ToolRegistry
+from core.task_workspace import task_workspace
 from run_api_demo import ROLE_PROMPTS
 from run_research_demo import FAULT_SCENARIOS, GOAL as RESEARCH_GOAL, run_demo as run_research_demo
 from run_software_demo import run_demo as run_software_demo
+from domains.software_demo import DEFAULT_GOAL as SOFTWARE_DEMO_GOAL
 from domains.research_demo import ResearchDomainAdapter
 
 
@@ -64,10 +69,12 @@ PROJECT_DIR = Path(__file__).resolve().parent
 RUNTIME_VIEW_SCHEMA_VERSION = "1.0"
 TOOL_TEST_WORKSPACE = PROJECT_DIR / "tool_test_workspace"
 RESEARCH_EXECUTION_MODE = "Research Demo (offline)"
-SOFTWARE_EXECUTION_MODE = "Software Demo (offline)"
+SOFTWARE_EXECUTION_MODE = "Software Demo（固定加法修复演示）"
 DEFAULT_EXECUTION_MODES = ("标准多 Agent", "长程任务", RESEARCH_EXECUTION_MODE, SOFTWARE_EXECUTION_MODE)
 DEVELOPER_EXECUTION_MODES = ("工具调用自检", "失败修复自检")
 CONTRACT_MODES = ("预览确认", "自动演示")
+MAX_GLOBAL_TOKEN_LIMIT = 10_000_000
+_API_USAGE_LOCK = threading.Lock()
 STATUS_LABELS = {
     "success": "成功", "completed": "已完成", "failed": "失败",
     "paused": "已暂停", "budget_exhausted": "预算耗尽", "running": "执行中",
@@ -90,6 +97,11 @@ def _status_zh(value):
     return STATUS_LABELS.get(value.lower(), value)
 
 
+def _validate_global_token_limit(max_tokens: int, global_token_limit: int) -> None:
+    if not max_tokens < global_token_limit <= MAX_GLOBAL_TOKEN_LIMIT:
+        raise ValueError("全局 token 限额必须大于单次输出上限，且不超过 10,000,000")
+
+
 def _domain_zh(value):
     value = str(value)
     return DOMAIN_LABELS.get(value.lower(), value)
@@ -97,6 +109,77 @@ def _domain_zh(value):
 
 def long_horizon_runs_root() -> Path:
     return Path(os.getenv("LONG_HORIZON_RUNS_DIR", str(PROJECT_DIR / "runs" / "long_horizon")))
+
+
+def save_api_usage_evidence(path: Path, run_id: str, client: OpenAICompatibleClient, config: ModelConfig, status: str, checkpoint: bool = False):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot = client.budget_snapshot()
+    session = {
+        "evidence_type": "live_api_usage",
+        "status_at_save": status,
+        "checkpoint": checkpoint,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "model": config.model,
+        "endpoint": config.base_url,
+        "limits": {
+            "single_call_output_tokens": config.max_tokens,
+            "global_tokens": config.global_token_limit,
+            "model_calls": config.max_model_calls,
+            "runtime_seconds": config.max_runtime_seconds,
+        },
+        "usage": snapshot,
+        "provider_usage_calls": int(snapshot.get("provider_usage_calls", 0)),
+        "note": "Missing provider usage is estimated locally; estimates are not provider billing records.",
+    }
+    with _API_USAGE_LOCK:
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        sessions = existing.get("sessions", []) if isinstance(existing, dict) else []
+        if not isinstance(sessions, list):
+            sessions = []
+        if sessions and sessions[-1].get("checkpoint"):
+            sessions[-1] = session
+        else:
+            sessions.append(session)
+        payload = {"run_id": run_id, "sessions": sessions}
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+
+
+def save_standard_run_evidence(path: Path, run_id: str, workspace: Path, report: RunReport):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "evidence_type": "standard_multi_agent_run",
+        "run_id": run_id,
+        "goal": report.goal,
+        "status": report.status,
+        "workspace": str(workspace.resolve()),
+        "rounds": report.rounds,
+        "started_at": report.started_at,
+        "finished_at": report.finished_at,
+        "failures": report.failures,
+        "results": {task_id: asdict(result) for task_id, result in report.results.items()},
+    }
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def load_api_usage_totals(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        sessions = payload.get("sessions", [])
+        if not sessions:
+            return {}
+        usage = dict(sessions[-1].get("usage", {}))
+        if "provider_usage_calls" not in usage and "provider_usage_calls" in sessions[-1]:
+            usage["provider_usage_calls"] = sessions[-1]["provider_usage_calls"]
+        return usage
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+        return {}
 
 
 def validate_runtime_view(payload):
@@ -135,7 +218,7 @@ def latest_runtime_view(project_dir=PROJECT_DIR):
     return max(candidates, key=lambda item: item.stat().st_mtime) if candidates else None
 
 
-def build_registry(client=None, workspace=None, on_tool_event=None, tool_test: bool = False) -> AgentRegistry:
+def build_registry(client=None, workspace=None, on_tool_event=None, tool_test: bool = False, scope_goal=None) -> AgentRegistry:
     registry = AgentRegistry()
     if client is not None:
         workspace = workspace or __import__("pathlib").Path.cwd()
@@ -157,11 +240,20 @@ def build_registry(client=None, workspace=None, on_tool_event=None, tool_test: b
         if client is None:
             registry.register(DeterministicAgent(role))
         else:
-            max_steps = 24 if role in ("developer", "experimenter") else 12
+            max_steps = 48 if role in ("developer", "experimenter") else 24
             if tool_test:
                 prompt += (
                     "\nThis is an isolated tool-call self-test. Perform the requested workspace actions "
                     "with tools, run the real unittest command, and stop immediately after it passes."
+                )
+            elif scope_goal:
+                prompt += (
+                    "\nCURRENT TASK SCOPE: The current user's task and confirmed acceptance contract are the only "
+                    "sources of requirements. Treat existing workspace files, project documents, examples, and "
+                    "prior tasks as context only; use them as requirements only when the current user explicitly "
+                    "asks. Do not add features, frameworks, authentication, tests, documentation, or deployment "
+                    "requirements unless the current task asks for them. Keep work proportional to the task. "
+                    f"Current user task: {scope_goal}"
                 )
             registry.register(
                 ToolCallingAgent(
@@ -718,7 +810,13 @@ class FreshUI(tk.Tk):
         tk.Label(inner, text="描述你希望 Agent 团队完成的工作", bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).pack(anchor=tk.W, pady=(2, 8))
         self.goal = tk.Text(inner, height=6, wrap=tk.WORD, bd=0, padx=10, pady=9, background="#F8FBFA", foreground=COLORS["text"], insertbackground=COLORS["mint_dark"], highlightbackground=COLORS["line"], highlightthickness=1, font=("Microsoft YaHei UI", 10))
         self.goal.pack(fill=tk.BOTH, expand=True)
-        self.goal.insert("1.0", "开发一个 FastAPI 服务，需要用户登录、自动化测试和 API 文档")
+        self.workspace_override = None
+        self.workspace_selected = False
+        self.workspace_label = tk.StringVar(value="任务工作目录：每次运行使用新的空白目录")
+        workspace_row = tk.Frame(inner, bg=COLORS["card"])
+        workspace_row.pack(fill=tk.X, pady=(8, 0))
+        tk.Label(workspace_row, textvariable=self.workspace_label, bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 8), anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(workspace_row, text="选择已有项目目录", style="Soft.TButton", command=self._select_long_horizon_workspace).pack(side=tk.RIGHT)
         actions = tk.Frame(inner, bg=COLORS["card"])
         actions.pack(fill=tk.X, pady=(10, 0))
         self.execution_mode = tk.StringVar(value="标准多 Agent")
@@ -790,6 +888,11 @@ class FreshUI(tk.Tk):
             self.goal.delete("1.0", tk.END)
             self.goal.insert("1.0", RESEARCH_GOAL)
             return
+        if mode == SOFTWARE_EXECUTION_MODE:
+            self.goal.delete("1.0", tk.END)
+            self.goal.insert("1.0", SOFTWARE_DEMO_GOAL)
+            self.append_log("Software Demo → 固定加法修复演示；自定义任务请使用标准多 Agent或长程任务")
+            return
         if mode not in ("工具调用自检", "失败修复自检"):
             return
         prompt_name = "REPAIR_PROMPT.txt" if mode == "失败修复自检" else "TEST_PROMPT.txt"
@@ -801,6 +904,13 @@ class FreshUI(tk.Tk):
         self.goal.delete("1.0", tk.END)
         self.goal.insert("1.0", prompt)
         self.temperature.set("0.1")
+
+    def _select_long_horizon_workspace(self):
+        selected = filedialog.askdirectory(parent=self, title="选择任务工作目录（其中现有文件可作为上下文）")
+        if selected:
+            self.workspace_override = Path(selected).resolve()
+            self.workspace_selected = True
+            self.workspace_label.set(f"任务工作目录：{self.workspace_override}")
 
     def _on_contract_mode_changed(self, _event=None):
         if self.contract_mode.get() == "自动演示":
@@ -830,14 +940,14 @@ class FreshUI(tk.Tk):
         tk.Label(inner, text="API Key 仅保存在当前窗口内存中", bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(2, 8))
         self.mode = tk.StringVar(value="本地 Stub")
         self._field(inner, 2, "运行模式", ttk.Combobox(inner, textvariable=self.mode, state="readonly", values=["本地 Stub", "API 模型"], width=25))
-        self.base_url = tk.StringVar(value="https://api.openai.com/v1")
+        self.base_url = tk.StringVar(value="https://umbrella-dioxide-very.ngrok-free.dev/v1")
         self._field(inner, 3, "接口地址", ttk.Entry(inner, textvariable=self.base_url, width=29))
         self.api_key = tk.StringVar()
         self._field(inner, 4, "API Key", ttk.Entry(inner, textvariable=self.api_key, show="●", width=29))
-        self.model_name = tk.StringVar()
+        self.model_name = tk.StringVar(value="gemini-3.8-flash")
         self._field(inner, 5, "模型名称", ttk.Entry(inner, textvariable=self.model_name, width=29))
         self.temperature = tk.StringVar(value="0.2")
-        self.max_tokens = tk.StringVar(value="4096")
+        self.max_tokens = tk.StringVar(value="2048")
         row = tk.Frame(inner, bg=COLORS["card"])
         row.grid(row=6, column=0, columnspan=2, sticky=tk.EW, pady=5)
         tk.Label(row, text="温度", width=12, anchor=tk.W, bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT)
@@ -852,8 +962,32 @@ class FreshUI(tk.Tk):
         ttk.Entry(runtime_row, textvariable=self.api_timeout, width=7).pack(side=tk.LEFT)
         tk.Label(runtime_row, text="重规划次数", bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT, padx=(14, 6))
         ttk.Entry(runtime_row, textvariable=self.replan_attempts, width=8).pack(side=tk.LEFT)
+        budget_row = tk.Frame(inner, bg=COLORS["card"])
+        budget_row.grid(row=8, column=0, columnspan=2, sticky=tk.EW, pady=(7, 2))
+        self.global_token_limit = tk.StringVar(value="64000")
+        self.max_model_calls = tk.StringVar(value="30")
+        self.max_runtime_seconds = tk.StringVar(value="600")
+        tk.Label(budget_row, text="全局 tokens", bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT)
+        ttk.Entry(budget_row, textvariable=self.global_token_limit, width=12).pack(side=tk.LEFT, padx=(4, 10))
+        tk.Label(budget_row, text="调用上限", bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT)
+        ttk.Entry(budget_row, textvariable=self.max_model_calls, width=5).pack(side=tk.LEFT, padx=(4, 10))
+        tk.Label(budget_row, text="秒", bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).pack(side=tk.RIGHT)
+        ttk.Entry(budget_row, textvariable=self.max_runtime_seconds, width=6).pack(side=tk.RIGHT, padx=4)
+        tk.Label(
+            inner,
+            text="全局额度按本次运行计；单次输出上限按每次 API 请求计。缺少 usage 时记录本地估算。",
+            bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 8), wraplength=355, justify=tk.LEFT,
+        ).grid(row=9, column=0, columnspan=2, sticky=tk.W, pady=(0, 2))
         self.test_btn = ttk.Button(inner, text="测试连接", style="Soft.TButton", command=self.test_connection)
-        self.test_btn.grid(row=8, column=1, sticky=tk.E, pady=(9, 0))
+        phase_row = tk.Frame(inner, bg=COLORS["card"])
+        phase_row.grid(row=10, column=0, columnspan=2, sticky=tk.EW, pady=3)
+        self.max_phases = tk.StringVar(value="12")
+        self.max_total_tasks = tk.StringVar(value="200")
+        tk.Label(phase_row, text="长程阶段上限", bg=COLORS["card"], fg=COLORS["muted"]).pack(side=tk.LEFT)
+        ttk.Entry(phase_row, textvariable=self.max_phases, width=6).pack(side=tk.LEFT, padx=5)
+        tk.Label(phase_row, text="任务上限", bg=COLORS["card"], fg=COLORS["muted"]).pack(side=tk.LEFT, padx=5)
+        ttk.Entry(phase_row, textvariable=self.max_total_tasks, width=7).pack(side=tk.LEFT)
+        self.test_btn.grid(row=11, column=1, sticky=tk.E, pady=(7, 0))
         inner.columnconfigure(1, weight=1)
 
     def _field(self, parent, row, label, widget):
@@ -1036,13 +1170,33 @@ class FreshUI(tk.Tk):
             raise ValueError("API Timeout 必须在 10 到 600 秒之间")
         if replan_attempts < 1 or replan_attempts > 5:
             raise ValueError("Replan Attempts 必须在 1 到 5 之间")
+        max_tokens = int(self.max_tokens.get())
+        global_token_limit = int(self.global_token_limit.get())
+        max_model_calls = int(self.max_model_calls.get())
+        max_runtime_seconds = int(self.max_runtime_seconds.get())
+        if not 64 <= max_tokens <= 8192:
+            raise ValueError("单次输出上限必须在 64 到 8192 tokens 之间")
+        _validate_global_token_limit(max_tokens, global_token_limit)
+        if not 1 <= max_model_calls <= 5000:
+            raise ValueError("模型调用上限必须在 1 到 5,000 之间")
+        if not 60 <= max_runtime_seconds <= 86400:
+            raise ValueError("最长运行时间必须在 60 到 86,400 秒之间")
+        max_phases = int(self.max_phases.get())
+        max_total_tasks = int(self.max_total_tasks.get())
+        if not 1 <= max_phases <= 1000 or not 1 <= max_total_tasks <= 10000:
+            raise ValueError("长程阶段上限须为 1 到 1,000，任务上限须为 1 到 10,000")
         return ModelConfig(
             base_url=self.base_url.get().strip().rstrip("/"),
             api_key=self.api_key.get().strip(),
             model=self.model_name.get().strip(),
             temperature=float(self.temperature.get()),
-            max_tokens=int(self.max_tokens.get()),
+            max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
+            global_token_limit=global_token_limit,
+            max_model_calls=max_model_calls,
+            max_runtime_seconds=max_runtime_seconds,
+            long_horizon_max_phases=max_phases,
+            long_horizon_max_tasks=max_total_tasks,
         )
 
     def test_connection(self):
@@ -1074,6 +1228,24 @@ class FreshUI(tk.Tk):
             messagebox.showwarning("缺少任务", "请输入任务目标。")
             return
         execution_mode = self.execution_mode.get()
+        if execution_mode == SOFTWARE_EXECUTION_MODE and goal != SOFTWARE_DEMO_GOAL:
+            messagebox.showwarning(
+                "固定演示模式",
+                "当前模式只运行固定的加法修复演示，不会执行输入框中的自定义任务。请切换到“标准多 Agent”或“长程任务”。",
+            )
+            return
+        run_id = __import__("uuid").uuid4().hex[:12] if execution_mode in ("长程任务", "标准多 Agent") else None
+        workspace_path = None
+        if execution_mode in ("长程任务", "标准多 Agent"):
+            self.workspace_override = task_workspace(
+                PROJECT_DIR,
+                run_id,
+                selected=self.workspace_override if self.workspace_selected else None,
+                long_horizon=execution_mode == "长程任务",
+            )
+            if not self.workspace_selected:
+                self.workspace_label.set(f"任务工作目录：{self.workspace_override}")
+            workspace_path = self.workspace_override
         try:
             config = None if execution_mode in (RESEARCH_EXECUTION_MODE, SOFTWARE_EXECUTION_MODE) else self._config()
         except Exception as exc:
@@ -1093,7 +1265,13 @@ class FreshUI(tk.Tk):
         self.task_items.clear()
         self._set_state("运行中", COLORS["blue_dark"])
         self.append_log(f"主控 Agent ← {goal}")
-        threading.Thread(target=self._run_worker, args=(goal, config, execution_mode, None), daemon=True).start()
+        if workspace_path:
+            self.append_log(f"工作目录 → {Path(workspace_path).resolve()}（Shell 命令不是操作系统级目录沙箱）")
+        threading.Thread(
+            target=self._run_worker,
+            args=(goal, config, execution_mode, None, str(workspace_path) if workspace_path else None, run_id),
+            daemon=True,
+        ).start()
 
     def pause_run(self):
         if not self.running or self.active_controller is None:
@@ -1136,6 +1314,21 @@ class FreshUI(tk.Tk):
         if not state.acceptance_contract:
             messagebox.showerror("无法恢复", "该历史任务没有持久化验收合同。")
             return
+        workspace_path = state.workspace_path
+        if workspace_path is None:
+            workspace_path = filedialog.askdirectory(
+                parent=self,
+                title="该旧运行没有保存工作目录，请选择恢复时使用的目录",
+                initialdir=str(PROJECT_DIR),
+            )
+            if not workspace_path:
+                return
+        elif not Path(workspace_path).is_dir():
+            messagebox.showerror("无法恢复", f"原工作目录不存在：\n{workspace_path}")
+            return
+        self.workspace_override = Path(workspace_path).resolve()
+        self.workspace_selected = True
+        self.workspace_label.set(f"任务工作目录：{self.workspace_override}")
         self.goal.delete("1.0", tk.END)
         self.goal.insert("1.0", state.goal)
         self.execution_mode.set("长程任务")
@@ -1146,11 +1339,14 @@ class FreshUI(tk.Tk):
         self._set_state("正在恢复长程任务", COLORS["blue_dark"])
         threading.Thread(
             target=self._run_worker,
-            args=(state.goal, config, "长程任务", state.run_id),
+            args=(state.goal, config, "长程任务", state.run_id, workspace_path, state.run_id),
             daemon=True,
         ).start()
 
-    def _run_worker(self, goal, config, execution_mode, resume_run_id=None):
+    def _run_worker(self, goal, config, execution_mode, resume_run_id=None, workspace_path=None, assigned_run_id=None):
+        client = None
+        api_usage_path = None
+        long_run_id = assigned_run_id or resume_run_id or __import__("uuid").uuid4().hex[:12]
         try:
             if execution_mode == RESEARCH_EXECUTION_MODE:
                 runs_root = long_horizon_runs_root() / "research"
@@ -1225,27 +1421,53 @@ class FreshUI(tk.Tk):
                 plan = build_tool_test_plan(goal)
                 domain = "tool_call_self_test"
                 workspace = TOOL_TEST_WORKSPACE
-            else:
-                workspace = PROJECT_DIR
+            elif execution_mode in ("长程任务", "标准多 Agent"):
+                workspace = Path(workspace_path).resolve()
+                workspace.mkdir(parents=True, exist_ok=True)
                 domain = pipeline.intent_parser.parse(goal).domain
                 if execution_mode == "标准多 Agent":
                     intent = pipeline.intent_parser.parse(goal)
                     drafts = pipeline.decomposer.decompose(intent)
                     drafts = pipeline.acceptance_generator.generate(intent, drafts)
                     plan = pipeline.planner.build(intent, drafts)
-                    domain = intent.domain
+            else:
+                workspace = PROJECT_DIR
+                domain = pipeline.intent_parser.parse(goal).domain
             if execution_mode != "长程任务":
                 self.events.put(("plan", (domain, plan)))
-            client = OpenAICompatibleClient(config) if config else None
+            initial_usage = {}
+            if config and execution_mode == "长程任务":
+                api_usage_path = long_horizon_runs_root() / long_run_id / "api_usage.json"
+                if resume_run_id:
+                    initial_usage = load_api_usage_totals(api_usage_path)
+            elif config and execution_mode == "标准多 Agent":
+                api_usage_path = PROJECT_DIR / "runs" / "user_tasks" / long_run_id / "api_usage.json"
+            client = OpenAICompatibleClient(config, initial_usage=initial_usage) if config else None
+            if execution_mode == "长程任务":
+                store = LongHorizonStore(long_horizon_runs_root())
+            if client:
+                def on_request_event(event, payload):
+                    if execution_mode == "长程任务":
+                        store.append_event(long_run_id, event, payload)
+                    if event == "api_retry_wait":
+                        self.events.put(("long_horizon_event", (event, payload)))
+                client.on_request_event = on_request_event
+            if client and api_usage_path:
+                client.on_budget_update = lambda _snapshot: save_api_usage_evidence(
+                    api_usage_path, long_run_id, client, config, "running", checkpoint=True
+                )
 
             def on_tool_event(event, payload):
                 self.events.put(("tool_event", (event, payload)))
+                if execution_mode == "长程任务":
+                    store.append_event(long_run_id, event, payload)
 
             registry = build_registry(
                 client,
                 workspace=workspace,
                 on_tool_event=on_tool_event,
                 tool_test=tool_test,
+                scope_goal=goal,
             )
 
             def model_probe():
@@ -1305,26 +1527,31 @@ class FreshUI(tk.Tk):
                         on_event=on_replanner_event,
                     )
 
-                    baseline_plan = pipeline.build(goal)
-
                     def on_contract_event(event, payload):
                         self.events.put(("contract_event", (event, payload)))
 
-                    domain = pipeline.intent_parser.parse(goal).domain
                     if persisted_contract:
                         contract = persisted_contract
                     else:
                         contract = StructuredGoalContractGenerator(
                             client,
                             on_event=on_contract_event,
-                        ).generate(goal, plan_hint=baseline_plan, domain=domain)
+                        ).generate(goal)
                 else:
                     replanner = DeterministicRecoveryPlanner()
-                    baseline_plan = pipeline.build(goal)
                     contract = (
                         persisted_contract
                         if persisted_contract
-                        else AcceptanceContract.from_plan(goal, baseline_plan)
+                        else AcceptanceContract(
+                            goal=goal,
+                            goal_summary=goal,
+                            criteria=[GoalCriterion(
+                                id="semantic_current_goal",
+                                description="Complete only the current user's stated task and provide evidence of its requested outcome.",
+                                check_type="semantic",
+                            )],
+                            constraints=["Only the current user goal defines requirements; prior documents and projects are context only."],
+                        )
                     )
 
                 if not persisted_state:
@@ -1390,10 +1617,11 @@ class FreshUI(tk.Tk):
                     store=store,
                     evaluator=global_evaluator,
                     replanner=replanner,
-                    max_phases=3,
-                    max_total_tasks=50,
+                    max_phases=config.long_horizon_max_phases if config else 12,
+                    max_total_tasks=config.long_horizon_max_tasks if config else 200,
                     on_event=on_long_event,
                     acceptance_contract=contract.to_dict(),
+                    workspace_path=str(workspace),
                     local_recovery=LocalDAGRecoveryController(
                         orchestrator,
                         max_cycles=1,
@@ -1401,15 +1629,30 @@ class FreshUI(tk.Tk):
                 )
                 self.active_controller = controller
                 self.events.put(("controller_ready", None))
-                report = controller.run(goal, run_id=resume_run_id, resume=bool(resume_run_id))
+                report = controller.run(goal, run_id=long_run_id, resume=bool(resume_run_id))
+                if client and api_usage_path:
+                    save_api_usage_evidence(api_usage_path, report.state.run_id, client, config, report.state.status)
                 self.events.put(("long_horizon_report", (report, store.state_path(report.state.run_id))))
             else:
                 standard_contract = AcceptanceContract.from_plan(goal, plan)
                 enforce_preflight(plan, standard_contract)
                 main = MainAgent(orchestrator, pipeline.build)
                 report = main.orchestrator.run(plan)
+                if execution_mode == "标准多 Agent":
+                    evidence_dir = PROJECT_DIR / "runs" / "user_tasks" / long_run_id
+                    save_standard_run_evidence(evidence_dir / "run_report.json", long_run_id, workspace, report)
+                    if client and api_usage_path:
+                        save_api_usage_evidence(api_usage_path, long_run_id, client, config, report.status)
                 self.events.put(("report", report))
+                if execution_mode == "标准多 Agent" and report.status == "success":
+                    self.events.put(("artifacts_published", {"path": str(workspace)}))
         except Exception as exc:
+            if client and api_usage_path:
+                try:
+                    save_api_usage_evidence(api_usage_path, long_run_id, client, config, "failed")
+                    exc = RuntimeError(f"{exc}\nAPI 用量记录：{api_usage_path}")
+                except OSError:
+                    pass
             self.events.put(("run_error", str(exc)))
 
     def _drain(self):
@@ -1423,7 +1666,7 @@ class FreshUI(tk.Tk):
                 elif kind == "connection_error":
                     self.test_btn.configure(state=tk.NORMAL)
                     self._set_state("连接失败", COLORS["danger"])
-                    messagebox.showerror("连接失败", payload)
+                    messagebox.showerror("模型 API 连接失败", payload)
                 elif kind == "plan":
                     domain, plan = payload
                     self.append_log(f"IntentParser → domain={domain}")
@@ -1529,6 +1772,8 @@ class FreshUI(tk.Tk):
             summary = result.summary.replace("\n", " ")[:180]
             self.append_log(f"{task_id} [{result.status}] → {summary}")
         self.append_log(f"主控 Agent → 状态={_status_zh(report.status)}，执行轮次={report.rounds}")
+        if report.status != "success":
+            self.append_log("产物验收未通过；工作目录保留供检查，本次不标记为已发布。")
         self.running = False
         self.active_controller = None
         self.run_btn.configure(state=tk.NORMAL)
@@ -1663,6 +1908,12 @@ class FreshUI(tk.Tk):
             )
         elif event == "budget_exhausted":
             self.append_log(f"长程任务 → 预算耗尽 · {detail.get('reason', '')}")
+        elif event == "api_retry_wait":
+            self.append_log(f"API 暂时不可用 → 等待 {detail.get('wait_seconds', 0):.1f} 秒后重试（第 {detail.get('attempt', '?')} 次）")
+        elif event == "run_interrupted":
+            self.append_log(f"运行已保存 → {_status_zh(detail.get('status', 'paused'))} · {detail.get('reason', '')}；可从运行历史恢复")
+        elif event == "phase_resume_results" and detail.get("reused_tasks"):
+            self.append_log(f"阶段恢复 → 复用已核验任务 {detail['reused_tasks']}；其余任务继续执行")
         elif event == "run_failed":
             self.append_log(f"长程任务 → 运行失败 · {detail.get('reason', '')}")
         elif event == "run_completed":
@@ -1689,6 +1940,9 @@ class FreshUI(tk.Tk):
             f"任务数={state.total_tasks}"
         )
         self.append_log(f"运行状态文件 → {state_path}")
+        usage_path = Path(state_path).with_name("api_usage.json")
+        if usage_path.is_file():
+            self.append_log(f"API 用量记录 → {usage_path}")
         self.running = False
         self.active_controller = None
         self.run_btn.configure(state=tk.NORMAL)

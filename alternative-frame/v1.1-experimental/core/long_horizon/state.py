@@ -50,6 +50,7 @@ class LongHorizonState:
     artifacts: List[str] = field(default_factory=list)
     evidence_records: List[Dict[str, Any]] = field(default_factory=list)
     acceptance_contract: Dict[str, Any] | None = None
+    workspace_path: str | None = None
     decisions: List[str] = field(default_factory=list)
     phases: List[PhaseRecord] = field(default_factory=list)
     pending_plan: Dict[str, Any] | None = None

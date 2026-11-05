@@ -101,6 +101,13 @@ class RecoverySubgraphGenerator:
                 "prior_status": prior.status if prior else "blocked",
                 "prior_failures": list(prior.failures) if prior else ["blocked by failed dependency"],
                 "prior_summary": prior.summary if prior else "",
+                "prior_artifacts": list(prior.artifacts) if prior else [],
+                "prior_tool_results": [
+                    {"tool": record.get("tool"), "success": record.get("success"),
+                     "arguments": {key: value for key, value in record.get("arguments", {}).items() if key != "content"},
+                     "output": str(record.get("output_excerpt", ""))[:500]}
+                    for record in (prior.tool_records[-8:] if prior else [])
+                ],
                 "frozen_predecessors": [dep for dep in original.depends_on if dep in impact.frozen],
                 "frozen_tasks": list(impact.frozen),
             }
@@ -134,14 +141,19 @@ class LocalDAGRecoveryController:
         self.generator = generator or RecoverySubgraphGenerator()
         self.on_event = on_event
 
-    def run(self, plan: Plan, task_budget: int) -> LocalRecoveryOutcome:
-        report = self.orchestrator.run(plan)
-        executed = len(plan.subtasks)
+    def run(self, plan: Plan, task_budget: int, initial_results=None) -> LocalRecoveryOutcome:
+        report = self.orchestrator.run(plan, initial_results=initial_results)
+        executed = report.executed_task_count
         impacts = []
         attempted_cycles = 0
         for cycle in range(1, self.max_cycles + 1):
             if report.status == "success":
                 break
+            if any(
+                "model_request_failed" in failure or "global " in failure and "budget" in failure
+                for result in report.results.values() for failure in result.failures
+            ):
+                break  # resume this phase after the API/budget becomes available
             impact = self.analyzer.analyze(plan, report)
             impacts.append(impact.to_dict())
             if not impact.impacted:
@@ -164,7 +176,8 @@ class LocalDAGRecoveryController:
                     for task in subgraph.subtasks
                 ],
             })
-            recovered = self.orchestrator.run(subgraph)
+            frozen_results = {key: value for key, value in report.results.items() if key in impact.frozen}
+            recovered = self.orchestrator.run(subgraph, context_results=frozen_results)
             executed += len(subgraph.subtasks)
             report = self._merge(plan, report, recovered, impact)
             self._emit("local_recovery_finished", {
@@ -186,6 +199,12 @@ class LocalDAGRecoveryController:
     def _merge(plan, prior, recovered, impact):
         impacted = set(impact.impacted)
         results = {task_id: result for task_id, result in prior.results.items() if task_id not in impacted}
+        for task_id, result in recovered.results.items():
+            previous = prior.results.get(task_id)
+            if previous:
+                result.artifacts = list(dict.fromkeys(previous.artifacts + result.artifacts))
+                result.evidence = list(dict.fromkeys(previous.evidence + result.evidence))
+                result.tool_records = previous.tool_records + result.tool_records
         results.update(recovered.results)
         missing = [task.id for task in plan.subtasks if task.id not in results]
         failures = [

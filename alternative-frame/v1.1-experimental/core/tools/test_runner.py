@@ -23,5 +23,8 @@ class TestRunner(Tool):
         passed = result.success
         match = re.search(r"(\d+)\s+passed", result.output)
         failed = re.search(r"(\d+)\s+failed", result.output)
-        result.metadata.update({"command": command, "passed": passed, "passed_count": int(match.group(1)) if match else 0, "failed_count": int(failed.group(1)) if failed else (0 if passed else 1)})
+        unittest_match = re.search(r"Ran\s+(\d+)\s+tests?\s+in\s+[\d.]+s", result.output)
+        passed_count = int(match.group(1)) if match else (int(unittest_match.group(1)) if unittest_match and passed else 0)
+        failed_count = int(failed.group(1)) if failed else (0 if passed else 1)
+        result.metadata.update({"command": command, "passed": passed, "passed_count": passed_count, "failed_count": failed_count})
         return result

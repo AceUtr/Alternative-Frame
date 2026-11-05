@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from core.models import SubTask
 from core.tool_calling_agent import ToolCallingAgent
 from core.tools import FileEditor, ToolRegistry
+from core.tools import ShellRunner, TestRunner as ToolTestRunner
 from core.long_horizon import GoalEvaluation, LongHorizonState
 from core.planning import PlanningPipeline
 from ui import (
@@ -107,6 +108,15 @@ def test_file_editor_rejects_workspace_escape(tmp_path):
     )
     assert result.success is False
     assert "escapes workspace" in result.error
+
+
+def test_test_runner_counts_unittest_successes(tmp_path):
+    runner = ToolTestRunner(ShellRunner(tmp_path))
+    result = runner.execute({"command": "python -c \"print('Ran 8 tests in 0.010s\\\\n\\\\nOK')\""})
+
+    assert result.success is True
+    assert result.metadata["passed_count"] == 8
+    assert result.metadata["failed_count"] == 0
 
 
 def test_repair_fixture_is_reset_to_a_known_failure(tmp_path):

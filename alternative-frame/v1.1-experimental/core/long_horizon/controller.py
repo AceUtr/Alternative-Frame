@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from threading import Event
 from typing import Callable, List, Optional
 from uuid import uuid4
@@ -44,6 +44,7 @@ class LongHorizonController:
         on_event: Callable[[str, dict], None] | None = None,
         acceptance_contract: Optional[dict] = None,
         local_recovery: LocalDAGRecoveryController | None = None,
+        workspace_path: str | None = None,
     ):
         if max_phases < 1 or max_total_tasks < 1:
             raise ValueError("long-horizon budgets must be positive")
@@ -57,7 +58,31 @@ class LongHorizonController:
         self.on_event = on_event
         self.acceptance_contract = acceptance_contract
         self.local_recovery = local_recovery
+        self.workspace_path = workspace_path
         self._pause_requested = Event()
+        self._current_run_id = ""
+        self._active_phase = 0
+        previous_event = getattr(orchestrator, "_long_horizon_original_on_event", orchestrator.on_event)
+        orchestrator._long_horizon_original_on_event = previous_event
+
+        def durable_orchestrator_event(event, task, result=None):
+            if event in {"task_started", "task_finished", "task_retry_scheduled"} and self._current_run_id:
+                payload = {
+                    "phase": self._active_phase,
+                    "task_id": task.id,
+                    "role": task.role,
+                    "attempt": task.metadata.get("runtime_attempt"),
+                }
+                if result is not None:
+                    payload["result"] = asdict(result)
+                    original = self._active_plan.task_map().get(task.id, task)
+                    payload["task_fingerprint"] = LongHorizonStore.task_fingerprint(original)
+                    payload["artifact_hashes"] = LongHorizonStore.artifact_hashes(result, self.workspace_path or ".")
+                self.store.append_event(self._current_run_id, event, payload)
+            if previous_event:
+                previous_event(event, task, result)
+
+        orchestrator.on_event = durable_orchestrator_event
 
     def request_pause(self) -> None:
         """Request a safe pause at the next phase boundary."""
@@ -71,6 +96,7 @@ class LongHorizonController:
         if not goal or not goal.strip():
             raise ValueError("goal cannot be empty")
         run_id = run_id or uuid4().hex[:12]
+        self._current_run_id = run_id
         state = self._load_or_create(goal.strip(), run_id, resume)
         phase_reports: List[RunReport] = []
         if resume:
@@ -90,6 +116,11 @@ class LongHorizonController:
         state.status = "running"
         state.last_error = None
         self._persist(state, "run_started", {"resume": resume})
+        if state.phase >= state.max_phases:
+            state.status = "budget_exhausted"
+            state.last_error = "max_phases_exceeded"
+            self._persist(state, "budget_exhausted", {"reason": state.last_error, "phase_limit": state.max_phases})
+            return LongHorizonReport(state, phase_reports)
 
         try:
             while state.phase < state.max_phases:
@@ -112,14 +143,25 @@ class LongHorizonController:
                     self._persist(state, "run_failed", {"reason": state.last_error})
                     break
 
-                if state.total_tasks + len(plan.subtasks) > state.max_total_tasks:
+                resumed_results = self.store.successful_results(
+                    state.run_id, state.phase + 1, plan, self.workspace_path or "."
+                ) if resume and hasattr(self.store, "successful_results") else {}
+                remaining_task_count = len(plan.subtasks) - len(resumed_results)
+                if state.total_tasks + remaining_task_count > state.max_total_tasks:
                     state.status = "budget_exhausted"
                     state.last_error = "max_total_tasks_exceeded"
-                    self._persist(state, "budget_exhausted", {"reason": state.last_error})
+                    self._persist(state, "budget_exhausted", {
+                        "reason": state.last_error,
+                        "remaining_tasks": remaining_task_count,
+                        "task_limit": state.max_total_tasks,
+                    })
                     break
 
                 phase_number = state.phase + 1
+                self._active_phase = phase_number
+                self._active_plan = plan
                 state.pending_plan = plan_to_dict(plan)
+                self._persist(state, "phase_resume_results", {"phase": phase_number, "reused_tasks": sorted(resumed_results)})
                 self._persist(
                     state,
                     "phase_planned",
@@ -142,11 +184,25 @@ class LongHorizonController:
                     self.local_recovery.on_event = (
                         lambda event, payload: self._persist(state, event, payload)
                     )
-                    report = self.local_recovery.run(plan, remaining_budget).report
+                    report = self.local_recovery.run(
+                        plan, remaining_budget, initial_results=resumed_results
+                    ).report
                 else:
-                    report = self.orchestrator.run(plan)
+                    report = self.orchestrator.run(plan, initial_results=resumed_results)
                 phase_reports.append(report)
+                interruption = self._interruption_reason(report)
+                if interruption:
+                    state.status = "budget_exhausted" if "budget" in interruption.lower() else "paused"
+                    state.last_error = interruption
+                    state.pending_plan = plan_to_dict(plan)
+                    self._persist(state, "run_interrupted", {"phase": phase_number, "reason": interruption, "status": state.status})
+                    break
                 evaluation = self.evaluator.evaluate(state, plan, report)
+                if evaluation.reason == "semantic global evaluation unavailable or invalid":
+                    state.status = "paused"
+                    state.last_error = "global_evaluation_pending"
+                    self._persist(state, "run_interrupted", {"phase": phase_number, "status": state.status, "reason": state.last_error})
+                    break
                 self._record_phase(state, phase_number, plan, report, evaluation)
                 state.pending_plan = None
                 state.last_evaluation = evaluation.to_dict()
@@ -177,6 +233,19 @@ class LongHorizonController:
 
         return LongHorizonReport(state, phase_reports)
 
+    @staticmethod
+    def _interruption_reason(report):
+        for result in report.results.values():
+            if result.status == "success":
+                continue
+            for failure in result.failures:
+                if any(marker in failure.lower() for marker in (
+                    "model_request_failed", "global token budget", "global model call budget",
+                    "global run time budget", "provider usage exceeded", "api usage checkpoint failed",
+                )):
+                    return failure
+        return None
+
     def _audit_completed_state(self, state: LongHorizonState) -> GoalEvaluation:
         """Re-check persisted completion against the current contract evaluator.
 
@@ -199,6 +268,14 @@ class LongHorizonController:
                 raise ValueError("resume acceptance contract does not match persisted contract")
             if not state.acceptance_contract and self.acceptance_contract:
                 state.acceptance_contract = self.acceptance_contract
+            if state.max_phases < self.max_phases:
+                state.max_phases = self.max_phases
+                state.decisions.append(f"resume: expanded max_phases to {self.max_phases}")
+            state.max_total_tasks = max(state.max_total_tasks, self.max_total_tasks)
+            if state.workspace_path and self.workspace_path and state.workspace_path != self.workspace_path:
+                raise ValueError("resume workspace does not match persisted run workspace")
+            if not state.workspace_path and self.workspace_path:
+                state.workspace_path = self.workspace_path
             return state
         if self.store.state_path(run_id).exists():
             raise FileExistsError(f"run already exists: {run_id}; use resume=True")
@@ -208,6 +285,7 @@ class LongHorizonController:
             max_phases=self.max_phases,
             max_total_tasks=self.max_total_tasks,
             acceptance_contract=self.acceptance_contract,
+            workspace_path=self.workspace_path,
         )
 
     def _next_plan(self, state: LongHorizonState) -> Plan | None:
@@ -231,7 +309,7 @@ class LongHorizonController:
         evidence_records = [record for result in report.results.values() for record in result.tool_records]
         completed = [f"phase-{phase_number}:{task_id}" for task_id, result in report.results.items() if result.status == "success"]
         failed = [f"phase-{phase_number}:{task_id}" for task_id, result in report.results.items() if result.status != "success"]
-        state.total_tasks += report.executed_task_count or len(plan.subtasks)
+        state.total_tasks += report.executed_task_count
         state.completed_tasks.extend(completed)
         state.failed_tasks.extend(failed)
         for artifact in artifacts:
@@ -251,7 +329,7 @@ class LongHorizonController:
                 started_at=report.started_at,
                 finished_at=report.finished_at,
                 local_recovery_cycles=report.local_recovery_cycles,
-                executed_task_count=report.executed_task_count or len(plan.subtasks),
+                executed_task_count=report.executed_task_count,
             )
         )
 

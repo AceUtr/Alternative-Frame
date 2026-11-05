@@ -141,7 +141,8 @@ class StructuredReplanner:
                     "You are the recovery planner for a long-horizon multi-agent system. "
                     "Return one strict JSON object only. Do not use Markdown or prose. "
                     "Create the smallest recovery DAG needed to address the previous evaluation. "
-                    "Use only the supplied roles and each role's allowed tools."
+                    "Use only the supplied roles and each role's allowed tools. The confirmed acceptance contract "
+                    "is authoritative; do not add requirements from workspace files or prior tasks."
                 ),
             },
             {

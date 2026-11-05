@@ -48,7 +48,7 @@ class IntentParser:
         lowered = text.lower()
         software_words = ("软件", "代码", "服务", "api", "fastapi", "测试", "开发", "工程", "software")
         research_words = ("研究", "实验", "模型", "训练", "指标", "论文", "科研", "research", "experiment")
-        if any(word in text or word in lowered for word in software_words):
+        if any(word in text or word in lowered for word in software_words) or "计算器" in text or "calculator" in lowered:
             domain = "software_engineering"
         elif any(word in text or word in lowered for word in research_words):
             domain = "research"
@@ -80,6 +80,44 @@ class TaskDecomposer:
         ]
 
     def _software(self, intent: Intent) -> List[TaskDraft]:
+        lowered = intent.goal.lower()
+        if "计算器" in intent.goal or "calculator" in lowered:
+            return [
+                TaskDraft(
+                    "implementation",
+                    "developer",
+                    f"{intent.goal}。交付可直接运行的 PowerShell 科学计算器：引擎写入 src/CalculatorEngine.psm1，交互式命令行入口写入 calculator.ps1。支持 + - * / % ^、括号、正负号、pi/e/ans、sin/cos/tan、反三角函数、sqrt、abs、ln/log/exp，并提供角度/弧度模式。表达式必须由解析器计算，禁止 Invoke-Expression 或执行用户输入。兼容 Windows PowerShell 5.1 与 PowerShell 7。先写这两个正式文件；不要创建临时原型、额外测试脚本或做环境探测，工作区已确认有 PowerShell。",
+                    expected_outputs=["src/CalculatorEngine.psm1", "calculator.ps1"],
+                    required_tools=["file_editor", "shell_runner"],
+                    checks=[AcceptanceCheck(
+                        "calculator_engine_created",
+                        "本次运行生成 PowerShell 计算器引擎",
+                        "file_exists",
+                        command=None,
+                    )],
+                ),
+                TaskDraft(
+                    "tests",
+                    "tester",
+                    "实现文件已经存在。只创建 tests/test_calculator.ps1，不要修改实现；用严格失败模式测试四则运算、括号与优先级、幂运算、pi/e/ans、三角函数和角度/弧度、非法表达式与除零。测试脚本必须在任一断言失败时抛错并返回非零退出码。随后运行且只以此命令作为验收命令：pwsh -NoProfile -File tests/test_calculator.ps1。不要创建临时测试或探测环境。",
+                    depends_on=["implementation"],
+                    expected_outputs=["tests/test_calculator.ps1"],
+                    required_tools=["file_editor", "shell_runner", "test_runner"],
+                    checks=[
+                        AcceptanceCheck(
+                            "calculator_tests_created",
+                            "本次运行生成针对性 PowerShell 测试",
+                            "file_exists",
+                        ),
+                        AcceptanceCheck(
+                            "calculator_tests_pass",
+                            "PowerShell 计算器测试命令退出码为 0",
+                            "command",
+                            command="pwsh -NoProfile -File tests/test_calculator.ps1",
+                        ),
+                    ],
+                ),
+            ]
         return [
             TaskDraft("requirements", "analyst", "拆解需求并生成验收条件", expected_outputs=["requirements.md"], required_tools=["file_editor"]),
             TaskDraft("architecture", "architect", "设计模块、接口和数据模型", depends_on=["requirements"], expected_outputs=["architecture.md"], required_tools=["file_editor"]),
@@ -101,7 +139,8 @@ class AcceptanceCriteriaGenerator:
             elif task.id == "architecture":
                 task.checks = [AcceptanceCheck("architecture_written", "架构设计已记录", "file_exists")]
             elif task.id == "tests":
-                task.checks = [AcceptanceCheck("tests_created", "测试文件已创建", "file_exists")]
+                if not task.checks:
+                    task.checks = [AcceptanceCheck("tests_created", "测试文件已创建", "file_exists")]
             elif task.id.startswith("implementation"):
                 task.checks = [AcceptanceCheck("implementation_present", "源代码已生成", "file_exists")]
             elif task.id == "integration":

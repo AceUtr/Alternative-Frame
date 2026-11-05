@@ -53,12 +53,21 @@ def test_valid_edited_contract_is_accepted():
     assert contract.goal_summary == payload["goal_summary"]
 
 
+def test_pwsh_contract_allows_only_a_relative_test_script():
+    payload = contract_payload()
+    payload["criteria"][1]["command"] = "pwsh -NoProfile -File tests/test_calculator.ps1"
+
+    assert validate(payload).criteria[1].command == "pwsh -NoProfile -File tests/test_calculator.ps1"
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
         (lambda data: data.update(goal="替换后的目标"), "original user goal"),
         (lambda data: data["criteria"][0].update(path="C:\\secrets.txt"), "unsafe"),
         (lambda data: data["criteria"][1].update(command="python -m pytest; del /s *"), "forbidden"),
+        (lambda data: data["criteria"][1].update(command="pwsh -NoProfile -Command Remove-Item *"), "forbidden"),
+        (lambda data: data["criteria"][1].update(command="pwsh -NoProfile -File C:\\temp\\bad.ps1"), "safe relative"),
         (lambda data: data["criteria"][0].update(required="true"), "boolean"),
     ],
 )

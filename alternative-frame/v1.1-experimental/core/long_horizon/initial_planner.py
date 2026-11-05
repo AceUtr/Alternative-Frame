@@ -166,6 +166,8 @@ class RuleBasedContractPlanner:
             return "verification"
         if criterion.check_type == "metric":
             return "experiment"
+        if criterion.check_type == "semantic":
+            return "implementation"
         if criterion.check_type == "file_exists" and criterion.path:
             path = PurePosixPath(self._path(criterion.path))
             lowered = str(path).lower()
@@ -279,7 +281,9 @@ class StructuredInitialDAGGenerator:
                 "content": (
                     "Generate the initial multi-agent DAG directly from the confirmed contract. Return strict JSON only. "
                     "Do not use generic authentication templates or invent unrelated files. Every criterion must have "
-                    "exactly one owner and every file artifact exactly one creator."
+                    "exactly one owner and every file artifact exactly one creator. The confirmed contract is the "
+                    "only source of requirements; do not infer scope from workspace files or prior projects. "
+                    "Keep the DAG proportional to the goal and avoid optional features."
                 ),
             },
             {

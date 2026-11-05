@@ -17,6 +17,7 @@ class ContractValidator:
         "python",
         "python3",
         "py",
+        "pwsh",
         "pytest",
         "npm",
         "pnpm",
@@ -108,6 +109,13 @@ class ContractValidator:
         executable = lowered.split()[0].strip('"\'')
         if executable not in self.ALLOWED_COMMANDS:
             return f"command executable is not allowed: {executable}"
+        if executable == "pwsh":
+            parts = lowered.split()
+            if len(parts) != 4 or parts[1:3] != ["-noprofile", "-file"]:
+                return "PowerShell contract commands are limited to pwsh -NoProfile -File <relative .ps1 test>"
+            script = parts[3]
+            if not script.endswith(".ps1") or not self._safe_relative_path(script):
+                return "PowerShell test script must be a safe relative .ps1 path"
         if executable in {"npm", "pnpm", "yarn"}:
             parts = lowered.split()
             if len(parts) < 2 or parts[1] not in {"test", "run"}:

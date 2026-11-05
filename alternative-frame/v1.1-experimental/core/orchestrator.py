@@ -43,13 +43,17 @@ class Orchestrator:
         if self.on_event:
             self.on_event(event, task, result)
 
-    def run(self, plan: Plan, parallel: bool = True) -> RunReport:
+    def run(self, plan: Plan, parallel: bool = True, initial_results: Mapping[str, AgentResult] | None = None, context_results: Mapping[str, AgentResult] | None = None) -> RunReport:
         plan.validate()
         started = utc_now()
         started_epoch = time.perf_counter()
         task_map = plan.task_map()
-        results: Dict[str, AgentResult] = {}
-        pending = set(task_map)
+        results: Dict[str, AgentResult] = {
+            task_id: result
+            for task_id, result in (initial_results or {}).items()
+            if task_id in task_map and result.status == "success"
+        }
+        pending = set(task_map) - set(results)
         failures: List[str] = []
         rounds = 0
 
@@ -72,10 +76,10 @@ class Orchestrator:
 
             if parallel and len(ready) > 1:
                 with ThreadPoolExecutor(max_workers=min(self.max_workers, len(ready))) as pool:
-                    futures = {pool.submit(self._run_with_retry, task, results): task for task in ready}
+                    futures = {pool.submit(self._run_with_retry, task, {**(context_results or {}), **results}): task for task in ready}
                     batch = [future.result() for future in as_completed(futures)]
             else:
-                batch = [self._run_with_retry(task, results) for task in ready]
+                batch = [self._run_with_retry(task, {**(context_results or {}), **results}) for task in ready]
 
             for task, result in batch:
                 results[task.id] = result
@@ -84,7 +88,15 @@ class Orchestrator:
                     failures.append(f"{task.id}: {', '.join(result.failures) or result.status}")
 
         status = "success" if len(results) == len(task_map) and all(r.status == "success" for r in results.values()) else "failed"
-        return RunReport(plan.goal, status, results, rounds, started, utc_now(), failures, started_epoch=started_epoch, finished_epoch=time.perf_counter())
+        accepted_initial = {
+            task_id for task_id, result in (initial_results or {}).items()
+            if task_id in task_map and result.status == "success"
+        }
+        return RunReport(
+            plan.goal, status, results, rounds, started, utc_now(), failures,
+            started_epoch=started_epoch, finished_epoch=time.perf_counter(),
+            executed_task_count=len(task_map) - len(accepted_initial),
+        )
 
     def _run_with_retry(self, task: SubTask, current: Mapping[str, AgentResult]):
         agent = self.registry.get(task.role)
@@ -98,6 +110,13 @@ class Orchestrator:
             attempt_task.metadata["runtime_attempt"] = attempt
             if retry_feedback:
                 attempt_task.metadata["retry_feedback"] = retry_feedback.to_dict()
+                attempt_task.metadata["prior_artifacts"] = list(dict.fromkeys(accumulated_artifacts))
+                attempt_task.metadata["prior_tool_results"] = [
+                    {"tool": record.get("tool"), "success": record.get("success"),
+                     "arguments": {key: value for key, value in record.get("arguments", {}).items() if key != "content"},
+                     "output": str(record.get("output_excerpt", ""))[:500]}
+                    for record in accumulated_tool_records[-8:]
+                ]
             self._emit("task_started", attempt_task)
             try:
                 last = agent.run(attempt_task, dict(current))

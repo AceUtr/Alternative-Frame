@@ -130,6 +130,9 @@ class StructuredGoalContractGenerator:
             "domain_hint": domain,
             "initial_plan_hint": hint,
             "instructions": [
+                "The current user's goal is the sole source of requirements.",
+                "Do not treat files, repository history, templates, or prior tasks as requirements unless the current goal explicitly asks you to use them.",
+                "Do not expand a narrow task into a general product, service, authentication, documentation, or deployment project.",
                 "Extract every explicit functional, test, documentation, quality, security, and metric requirement.",
                 "Do not declare the task complete merely because Agents say success.",
                 "Use file_exists only when a concrete relative artifact path is justified.",
@@ -188,7 +191,12 @@ class StructuredGoalContractGenerator:
         return [
             {
                 "role": "system",
-                "content": "Return one compact strict JSON acceptance contract only. No reasoning or Markdown.",
+                "content": (
+                    "Return one compact strict JSON acceptance contract only. No reasoning or Markdown. "
+                    "The current user goal is the sole source of requirements. Ignore repository files, prior tasks, "
+                    "and examples unless the current user explicitly asks to use them. Do not expand a narrow task "
+                    "into an unrelated product or add unrequested features."
+                ),
             },
             {
                 "role": "user",

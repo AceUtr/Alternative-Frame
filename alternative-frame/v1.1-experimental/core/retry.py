@@ -24,12 +24,21 @@ class RetryFailureClassifier:
 
     TERMINAL_CODES = {"max_tool_steps_exceeded", "repeated_tool_call"}
     NON_RETRYABLE_MARKERS = (
+        "model_request_failed",
         "permission denied",
         "unauthorized",
         "http 401",
         "http 403",
         "unknown role",
         "cannot use tools",
+        "global token budget exhausted",
+        "provider usage exceeded the global token budget",
+        "global model call budget exhausted",
+        "global run time budget exhausted",
+        "timed out",
+        "read operation timed out",
+        "连接模型 api 超时",
+        "请求超时",
     )
 
     def retryable(self, result: AgentResult) -> bool:

@@ -53,6 +53,27 @@ def test_rule_planner_builds_contract_native_dag_without_auth_template():
     ArtifactOwnershipValidator().validate(plan, contract)
 
 
+def test_semantic_current_goal_creates_an_implementation_task():
+    contract = AcceptanceContract(
+        goal="实现一个加法计算器",
+        goal_summary="实现一个加法计算器",
+        criteria=[
+            GoalCriterion(
+                "semantic_current_goal",
+                "Complete only the current user's stated task and provide evidence of its requested outcome.",
+                "semantic",
+            )
+        ],
+    )
+
+    plan = RuleBasedContractPlanner().build(contract)
+
+    assert len(plan.subtasks) == 1
+    assert plan.subtasks[0].role == "developer"
+    assert plan.subtasks[0].id == "implement_contract_artifacts"
+    assert plan.subtasks[0].metadata["contract_criteria"] == ["semantic_current_goal"]
+
+
 class EmptyClient:
     def __init__(self):
         self.calls = 0

@@ -178,3 +178,48 @@ def test_store_lists_newest_valid_runs_and_ignores_corrupt_entries(tmp_path):
     (corrupt / "state.json").write_text("not-json", encoding="utf-8")
 
     assert [state.run_id for state in store.list_runs()] == ["newer", "older"]
+
+
+def test_state_round_trips_workspace_path_and_reads_legacy_state():
+    state = LongHorizonState("workspace-run", "goal", 2, 5, workspace_path="/tmp/task-workspace")
+    restored = LongHorizonState.from_dict(state.to_dict())
+
+    assert restored.workspace_path == "/tmp/task-workspace"
+    legacy = LongHorizonState.from_dict({"run_id": "legacy", "goal": "goal", "max_phases": 2, "max_total_tasks": 5})
+    assert legacy.workspace_path is None
+
+
+def test_controller_persists_workspace_path_for_new_runs(tmp_path):
+    controller = LongHorizonController(
+        make_orchestrator(),
+        lambda _state: Plan("phase", [SubTask("work", "worker", "work")]),
+        LongHorizonStore(tmp_path),
+        workspace_path=str(tmp_path / "workspace"),
+    )
+
+    report = controller.run("goal", run_id="workspace-run")
+
+    assert report.state.workspace_path == str(tmp_path / "workspace")
+    assert LongHorizonStore(tmp_path).load("workspace-run").workspace_path == str(tmp_path / "workspace")
+
+
+def test_controller_adopts_explicit_workspace_when_resuming_legacy_run(tmp_path):
+    pending = Plan("resume phase", [SubTask("resume-task", "worker", "resume")])
+    state = LongHorizonState("legacy-workspace-run", "resume goal", max_phases=3, max_total_tasks=10)
+    state.status = "running"
+    state.pending_plan = plan_to_dict(pending)
+    store = LongHorizonStore(tmp_path)
+    store.save(state)
+    workspace = str(tmp_path / "chosen-workspace")
+    controller = LongHorizonController(
+        make_orchestrator(),
+        lambda _state: Plan("unused", []),
+        store,
+        workspace_path=workspace,
+    )
+
+    report = controller.run("resume goal", run_id="legacy-workspace-run", resume=True)
+
+    assert report.status == "completed"
+    assert report.state.workspace_path == workspace
+    assert store.load("legacy-workspace-run").workspace_path == workspace
