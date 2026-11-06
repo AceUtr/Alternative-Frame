@@ -104,6 +104,19 @@ class TaskQueue:
             if cur.rowcount != 1:
                 raise ValueError("task is not leased to this agent")
 
+    def claim_id(self, task_id: str, agent: str, lease_seconds: float = 86400) -> dict | None:
+        """Claim exactly the DAG task selected by the existing scheduler."""
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
+        now = time.time()
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            cur = db.execute("UPDATE tasks SET status='claimed', owner=?, lease_until=?, attempts=attempts+1 WHERE id=? AND (status='pending' OR (status='claimed' AND lease_until <= ?))", (agent, now + lease_seconds, task_id, now))
+            db.execute("COMMIT")
+            if cur.rowcount != 1:
+                return None
+        return self.get(task_id)
+
     def release(self, task_id: str, agent: str) -> None:
         with self._connect() as db:
             cur = db.execute("UPDATE tasks SET status='pending', owner=NULL, lease_until=NULL WHERE id=? AND status='claimed' AND owner=?", (task_id, agent))

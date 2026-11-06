@@ -43,6 +43,7 @@ from core.planning import PlanningPipeline
 from core.preflight import HarnessPreflightChecker
 from core.tools import ExperimentRunner, FileEditor, GitClient, ShellRunner, TestRunner, ToolRegistry
 from core.task_workspace import task_workspace
+from core.experimental.runtime import PluginOptions, RuntimePlugins, record_execution_metadata
 from run_api_demo import ROLE_PROMPTS
 from run_research_demo import FAULT_SCENARIOS, GOAL as RESEARCH_GOAL, run_demo as run_research_demo
 from run_software_demo import run_demo as run_software_demo
@@ -788,6 +789,13 @@ class FreshUI(tk.Tk):
         right = self._card(top, side=tk.LEFT, fill=tk.Y, padx=(8, 0))
         self._task_card(left)
         self._model_card(right)
+        plugin_bar = tk.Frame(root, bg=COLORS["bg"])
+        plugin_bar.pack(fill=tk.X, pady=(8, 0))
+        self.plugin_options = PluginOptions()
+        self.plugin_summary = tk.StringVar(value="运行插件：全部关闭 · 保留原执行路径")
+        ttk.Label(plugin_bar, textvariable=self.plugin_summary, style="Subtitle.TLabel").pack(side=tk.LEFT)
+        self.plugin_btn = ttk.Button(plugin_bar, text="选择插件…", style="Soft.TButton", command=self.show_plugin_options)
+        self.plugin_btn.pack(side=tk.RIGHT)
 
         lower = tk.Frame(root, bg=COLORS["bg"])
         lower.pack(fill=tk.BOTH, expand=True, pady=(16, 0))
@@ -993,6 +1001,46 @@ class FreshUI(tk.Tk):
     def _field(self, parent, row, label, widget):
         tk.Label(parent, text=label, bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9)).grid(row=row, column=0, sticky=tk.W, padx=(0, 8), pady=5)
         widget.grid(row=row, column=1, sticky=tk.EW, pady=5)
+
+    def show_plugin_options(self):
+        if self.running:
+            messagebox.showinfo("运行配置已锁定", "当前运行结束后再修改；恢复任务沿用原插件组合。", parent=self)
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("运行插件")
+        dialog.configure(bg=COLORS["card"])
+        dialog.transient(self)
+        body = tk.Frame(dialog, bg=COLORS["card"], padx=22, pady=18)
+        body.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(body, text="按需接入 · 下次新运行生效", style="CardTitle.TLabel").pack(anchor=tk.W)
+        choices = {}
+        descriptions = [
+            ("bm25", "BM25 运行记忆", "保存任务结果；检索相关历史并注入上下文，按运行隔离。"),
+            ("messages", "依赖消息传递", "通过有界消息总线投递依赖摘要；沿用原 DAG，不是自由群聊。"),
+            ("task_queue", "SQLite 执行队列", "执行前认领、结束后确认；由原 DAG 和恢复机制决定重跑。"),
+            ("usage_audit", "用量交叉审计", "核对累计 token；原预算继续生效，费用未知时不显示零费用。"),
+        ]
+        for key, title, detail in descriptions:
+            var = tk.BooleanVar(value=getattr(self.plugin_options, key))
+            choices[key] = var
+            ttk.Checkbutton(body, text=title, variable=var).pack(anchor=tk.W, pady=(12, 0))
+            tk.Label(body, text=detail, bg=COLORS["card"], fg=COLORS["muted"], wraplength=480, justify=tk.LEFT).pack(anchor=tk.W, padx=(22, 0))
+        tk.Label(body, text="适用：API 模型的标准多 Agent / 长程任务。固定 Demo 和 Stub 不启用。\n插件不增加工具权限；不保证提升，需同条件重复对照。", bg=COLORS["card"], fg=COLORS["muted"], justify=tk.LEFT).pack(anchor=tk.W, pady=15)
+        buttons = tk.Frame(body, bg=COLORS["card"])
+        buttons.pack(fill=tk.X)
+        ttk.Button(buttons, text="全选", command=lambda: [v.set(True) for v in choices.values()]).pack(side=tk.LEFT)
+        ttk.Button(buttons, text="全部关闭", command=lambda: [v.set(False) for v in choices.values()]).pack(side=tk.LEFT, padx=6)
+        def apply():
+            self.plugin_options = PluginOptions.from_dict({k: v.get() for k, v in choices.items()})
+            self._update_plugin_summary()
+            dialog.destroy()
+        ttk.Button(buttons, text="应用", style="Accent.TButton", command=apply).pack(side=tk.RIGHT)
+        dialog.grab_set()
+
+    def _update_plugin_summary(self):
+        labels = {"bm25": "BM25", "messages": "依赖消息", "task_queue": "执行队列", "usage_audit": "用量审计"}
+        enabled = [label for key, label in labels.items() if getattr(self.plugin_options, key)]
+        self.plugin_summary.set("运行插件：" + (" / ".join(enabled) if enabled else "全部关闭 · 保留原执行路径"))
 
     def _dag_card(self, card):
         inner = tk.Frame(card, bg=COLORS["card"], padx=14, pady=12)
@@ -1228,6 +1276,10 @@ class FreshUI(tk.Tk):
             messagebox.showwarning("缺少任务", "请输入任务目标。")
             return
         execution_mode = self.execution_mode.get()
+        selected_plugins = self.plugin_options
+        if selected_plugins.enabled and (execution_mode not in ("长程任务", "标准多 Agent") or self.mode.get() != "API 模型"):
+            messagebox.showwarning("插件模式不支持", "插件适用于 API 模型的标准多 Agent / 长程任务。请切换模式或全部关闭插件。", parent=self)
+            return
         if execution_mode == SOFTWARE_EXECUTION_MODE and goal != SOFTWARE_DEMO_GOAL:
             messagebox.showwarning(
                 "固定演示模式",
@@ -1269,7 +1321,7 @@ class FreshUI(tk.Tk):
             self.append_log(f"工作目录 → {Path(workspace_path).resolve()}（Shell 命令不是操作系统级目录沙箱）")
         threading.Thread(
             target=self._run_worker,
-            args=(goal, config, execution_mode, None, str(workspace_path) if workspace_path else None, run_id),
+            args=(goal, config, execution_mode, None, str(workspace_path) if workspace_path else None, run_id, selected_plugins),
             daemon=True,
         ).start()
 
@@ -1306,13 +1358,29 @@ class FreshUI(tk.Tk):
         if self.running:
             messagebox.showwarning("任务正在运行", "请先等待当前任务结束或暂停。")
             return
+        if state.status == "completed":
+            messagebox.showinfo("任务已结束", "已完成运行保留为历史证据。需要重新实验时请新建任务和独立工作目录。", parent=self)
+            return
         try:
             config = self._config()
         except Exception as exc:
             messagebox.showwarning("模型配置错误", str(exc))
             return
+        if config is None and (long_horizon_runs_root() / state.run_id / "api_usage.json").exists():
+            messagebox.showwarning("运行模式不一致", "该历史运行使用真实 API。请选择 API 模型后恢复，避免将 Stub 结果混入真实证据。", parent=self)
+            return
         if not state.acceptance_contract:
             messagebox.showerror("无法恢复", "该历史任务没有持久化验收合同。")
+            return
+        saved_plugins = long_horizon_runs_root() / state.run_id / "plugins" / "config.json"
+        try:
+            self.plugin_options = PluginOptions.from_dict(json.loads(saved_plugins.read_text(encoding="utf-8"))["options"]) if saved_plugins.exists() else PluginOptions()
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            messagebox.showerror("插件配置无效", str(exc), parent=self)
+            return
+        self._update_plugin_summary()
+        if self.plugin_options.enabled and config is None:
+            messagebox.showwarning("运行模式不一致", "该运行启用了 API 插件，请选择 API 模型后恢复。", parent=self)
             return
         workspace_path = state.workspace_path
         if workspace_path is None:
@@ -1339,12 +1407,13 @@ class FreshUI(tk.Tk):
         self._set_state("正在恢复长程任务", COLORS["blue_dark"])
         threading.Thread(
             target=self._run_worker,
-            args=(state.goal, config, "长程任务", state.run_id, workspace_path, state.run_id),
+            args=(state.goal, config, "长程任务", state.run_id, workspace_path, state.run_id, self.plugin_options),
             daemon=True,
         ).start()
 
-    def _run_worker(self, goal, config, execution_mode, resume_run_id=None, workspace_path=None, assigned_run_id=None):
+    def _run_worker(self, goal, config, execution_mode, resume_run_id=None, workspace_path=None, assigned_run_id=None, plugin_options=None):
         client = None
+        configured = None
         api_usage_path = None
         long_run_id = assigned_run_id or resume_run_id or __import__("uuid").uuid4().hex[:12]
         try:
@@ -1443,6 +1512,13 @@ class FreshUI(tk.Tk):
             elif config and execution_mode == "标准多 Agent":
                 api_usage_path = PROJECT_DIR / "runs" / "user_tasks" / long_run_id / "api_usage.json"
             client = OpenAICompatibleClient(config, initial_usage=initial_usage) if config else None
+            options = plugin_options or PluginOptions()
+            plugins = None
+            if client and execution_mode in ("长程任务", "标准多 Agent"):
+                run_dir = (long_horizon_runs_root() if execution_mode == "长程任务" else PROJECT_DIR / "runs" / "user_tasks") / long_run_id
+                configured = RuntimePlugins(options, run_dir, workspace, goal, on_event=lambda e, p: self.events.put(("plugin_event", (e, p))))
+                record_execution_metadata(run_dir, workspace, goal, options, config, execution_mode)
+                plugins = configured if options.enabled else None
             if execution_mode == "长程任务":
                 store = LongHorizonStore(long_horizon_runs_root())
             if client:
@@ -1453,9 +1529,11 @@ class FreshUI(tk.Tk):
                         self.events.put(("long_horizon_event", (event, payload)))
                 client.on_request_event = on_request_event
             if client and api_usage_path:
-                client.on_budget_update = lambda _snapshot: save_api_usage_evidence(
-                    api_usage_path, long_run_id, client, config, "running", checkpoint=True
-                )
+                def checkpoint_usage(snapshot):
+                    save_api_usage_evidence(api_usage_path, long_run_id, client, config, "running", checkpoint=True)
+                    if plugins:
+                        plugins.observe_usage(snapshot)
+                client.on_budget_update = checkpoint_usage
 
             def on_tool_event(event, payload):
                 self.events.put(("tool_event", (event, payload)))
@@ -1495,7 +1573,7 @@ class FreshUI(tk.Tk):
                 ))
 
             evaluator = AcceptanceEvaluator(workspace=workspace, execute_commands=tool_test) if client else None
-            orchestrator = Orchestrator(registry, max_workers=4, on_event=on_event, acceptance=evaluator)
+            orchestrator = Orchestrator(registry, max_workers=4, on_event=on_event, acceptance=evaluator, plugins=plugins)
             if execution_mode == "长程任务":
                 runs_root = long_horizon_runs_root()
                 store = LongHorizonStore(runs_root)
@@ -1563,6 +1641,9 @@ class FreshUI(tk.Tk):
                         self.events.put(("run_cancelled", "用户取消了验收合同，未启动 Agent 或工具"))
                         return
                 ContractValidator().validate(contract, expected_goal=goal)
+                if client:
+                    contract_path = run_dir / "confirmed_contract.json"
+                    contract_path.write_text(json.dumps(contract.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
                 self.events.put((
                     "contract_confirmed",
                     {
@@ -1654,11 +1735,18 @@ class FreshUI(tk.Tk):
                 except OSError:
                     pass
             self.events.put(("run_error", str(exc)))
+        finally:
+            if configured is not None:
+                configured.close()
 
     def _drain(self):
         try:
             while True:
                 kind, payload = self.events.get_nowait()
+                if kind == "plugin_event":
+                    event, detail = payload
+                    self.append_log(f"插件 → {event} · {self._compact(detail, 220)}")
+                    continue
                 if kind == "connection":
                     self.test_btn.configure(state=tk.NORMAL)
                     self._set_state("模型连接成功", COLORS["success"])

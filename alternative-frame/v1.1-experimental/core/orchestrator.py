@@ -31,13 +31,19 @@ class RunReport:
 class Orchestrator:
     """Centralized Main Agent coordinator with dependency-aware parallelism."""
 
-    def __init__(self, registry: AgentRegistry, max_workers: int = 4, on_event: Callable | None = None, acceptance: AcceptanceEvaluator | None = None, retry_classifier: RetryFailureClassifier | None = None) -> None:
+    def __init__(self, registry: AgentRegistry, max_workers: int = 4, on_event: Callable | None = None, acceptance: AcceptanceEvaluator | None = None, retry_classifier: RetryFailureClassifier | None = None, plugins=None) -> None:
         self.registry = registry
         self.max_workers = max_workers
         self.on_event = on_event
         self.acceptance = acceptance
         self.retry_classifier = retry_classifier or RetryFailureClassifier()
         self._lock = Lock()
+        self.plugins = plugins
+
+    def _dispatch(self, task, current):
+        if self.plugins is None:
+            return self._run_with_retry(task, current)
+        return self.plugins.run_task(task, current, self._run_with_retry)
 
     def _emit(self, event: str, task: SubTask, result=None) -> None:
         if self.on_event:
@@ -76,10 +82,10 @@ class Orchestrator:
 
             if parallel and len(ready) > 1:
                 with ThreadPoolExecutor(max_workers=min(self.max_workers, len(ready))) as pool:
-                    futures = {pool.submit(self._run_with_retry, task, {**(context_results or {}), **results}): task for task in ready}
+                    futures = {pool.submit(self._dispatch, task, {**(context_results or {}), **results}): task for task in ready}
                     batch = [future.result() for future in as_completed(futures)]
             else:
-                batch = [self._run_with_retry(task, {**(context_results or {}), **results}) for task in ready]
+                batch = [self._dispatch(task, {**(context_results or {}), **results}) for task in ready]
 
             for task, result in batch:
                 results[task.id] = result
@@ -107,6 +113,8 @@ class Orchestrator:
         retry_feedback = None
         for attempt in range(1, task.max_retries + 2):
             attempt_task = deepcopy(task)
+            if self.plugins is not None:
+                attempt_task = self.plugins.prepare_task(attempt_task, current)
             attempt_task.metadata["runtime_attempt"] = attempt
             if retry_feedback:
                 attempt_task.metadata["retry_feedback"] = retry_feedback.to_dict()

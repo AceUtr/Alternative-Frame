@@ -42,7 +42,7 @@ class LongHorizonStore:
     def task_fingerprint(task) -> str:
         from dataclasses import asdict
         data = asdict(task)
-        for key in ("runtime_attempt", "retry_feedback", "local_recovery_feedback", "prior_artifacts", "prior_tool_results"):
+        for key in ("runtime_attempt", "retry_feedback", "local_recovery_feedback", "prior_artifacts", "prior_tool_results", "runtime_plugin_context"):
             data["metadata"].pop(key, None)
         return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 

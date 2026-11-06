@@ -69,6 +69,8 @@ class ToolCallingAgent(Agent):
                 "Do not claim completion from prose alone.",
             ],
         }
+        if task.metadata.get("runtime_plugin_context") is not None:
+            payload["runtime_plugin_context"] = task.metadata["runtime_plugin_context"]
         messages = [
             {"role": "system", "content": self.system_prompt + protocol},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
