@@ -1,0 +1,41 @@
+........................................................................ [ 33%]
+.......................................................................F [ 66%]
+........................................................................ [ 99%]
+..                                                                       [100%]
+================================== FAILURES ===================================
+________ test_execution_metadata_records_source_hashes_not_credentials ________
+
+tmp_path = WindowsPath('E:/Project/WorkBuddy/Alternative-Frame-比赛/GitHub上传核对_20261111/pytest_temp/test_execution_metadata_record0')
+
+    def test_execution_metadata_records_source_hashes_not_credentials(tmp_path):
+        from core.experimental.runtime import record_execution_metadata
+        from core.model_client import ModelConfig
+        config = ModelConfig("https://example.invalid", "DO_NOT_SAVE", "model")
+        record_execution_metadata(tmp_path, tmp_path, "goal", PluginOptions(), config, "API")
+        record_execution_metadata(tmp_path, tmp_path, "goal", PluginOptions(), config, "API")
+>       raw = (tmp_path / "execution_metadata.json").read_text()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_plugin_integration.py:204:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('E:/Project/WorkBuddy/Alternative-Frame-比赛/GitHub上传核对_20261111/pytest_temp/test_execution_metadata_record0/execution_metadata.json')
+encoding = 'locale', errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0xaf in position 283: illegal multibyte sequence
+
+C:\Users\wang\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\pathlib.py:1028: UnicodeDecodeError
+---------------------------- Captured stderr call -----------------------------
+fatal: not a git repository (or any of the parent directories): .git
+fatal: not a git repository (or any of the parent directories): .git
+=========================== short test summary info ===========================
+FAILED tests/test_plugin_integration.py::test_execution_metadata_records_source_hashes_not_credentials
+1 failed, 217 passed in 14.59s

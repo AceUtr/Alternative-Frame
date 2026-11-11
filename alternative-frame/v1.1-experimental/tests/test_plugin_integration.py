@@ -198,10 +198,12 @@ def test_historical_export_uses_last_cumulative_snapshot_and_reports_mismatch(tm
 def test_execution_metadata_records_source_hashes_not_credentials(tmp_path):
     from core.experimental.runtime import record_execution_metadata
     from core.model_client import ModelConfig
+    tmp_path = tmp_path / "中文运行记录"
+    tmp_path.mkdir()
     config = ModelConfig("https://example.invalid", "DO_NOT_SAVE", "model")
     record_execution_metadata(tmp_path, tmp_path, "goal", PluginOptions(), config, "API")
     record_execution_metadata(tmp_path, tmp_path, "goal", PluginOptions(), config, "API")
-    raw = (tmp_path / "execution_metadata.json").read_text()
+    raw = (tmp_path / "execution_metadata.json").read_text(encoding="utf-8")
     assert "DO_NOT_SAVE" not in raw
     data = json.loads(raw)
     assert len(data["sessions"]) == 2

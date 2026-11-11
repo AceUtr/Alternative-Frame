@@ -1,0 +1,41 @@
+{
+  "experiment": "noise_ablation_bounded_vs_unbounded",
+  "workload": "deterministic 5-agent review pipeline, no LLM calls",
+  "params": {
+    "agents": [
+      "coordinator",
+      "planner",
+      "coder",
+      "tester",
+      "reviewer"
+    ],
+    "max_rounds": 30,
+    "repeats": 5,
+    "token_estimate": "chars/2, rough"
+  },
+  "bounded_on": {
+    "messages_sent_mean": 5.0,
+    "messages_delivered_mean": 5.0,
+    "estimated_tokens_mean": 508.5,
+    "completed_all": true,
+    "wall_seconds_mean": 5.1e-05,
+    "repeats": 5
+  },
+  "unbounded_off": {
+    "messages_sent_mean": 304.0,
+    "messages_delivered_mean": 311.0,
+    "estimated_tokens_mean": 50031.0,
+    "completed_all": true,
+    "wall_seconds_mean": 0.00117,
+    "repeats": 5
+  },
+  "noise_reduction": {
+    "messages_ratio": 62.2,
+    "token_ratio": 98.39
+  },
+  "honesty_boundary": [
+    "确定性模拟工作负载，不含真实 LLM 调用",
+    "结论仅限于该工作负载下的通信开销对比，不代表推理质量"
+  ],
+  "generated_at": "2026-11-11 10:20:47"
+}

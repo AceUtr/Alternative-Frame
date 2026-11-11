@@ -1,0 +1,9 @@
+=== 降噪消融实验结果（重复 5 次，均值） ===
+      messages_sent_mean: ON=5.0  OFF=304.0
+ messages_delivered_mean: ON=5.0  OFF=311.0
+   estimated_tokens_mean: ON=508.5  OFF=50031.0
+           completed_all: ON=True  OFF=True
+       wall_seconds_mean: ON=5.1e-05  OFF=0.00117
+           消息量降噪倍数: 62.2x
+        Token 降噪倍数: 98.39x
+报告已写入: E:\Project\WorkBuddy\Alternative-Frame-比赛\GitHub上传核对_20261111\clean_source\alternative-frame\v1.1-experimental\reports\noise-ablation\noise-ablation-20261111-102047.json

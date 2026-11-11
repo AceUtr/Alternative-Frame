@@ -1,0 +1,2 @@
+# Preserve verification artifacts byte-for-byte across Windows/Linux checkouts.
+* -text whitespace=cr-at-eol

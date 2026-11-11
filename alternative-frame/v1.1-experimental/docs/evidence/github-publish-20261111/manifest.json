@@ -1,0 +1,117 @@
+{
+  "date": "2026-11-11",
+  "branch": "codex/v1.1-optional-plugins",
+  "base_commit": "aaeec11a1bc23bc0dda51a0b14832b3d0ac0d661",
+  "tested_delta": [
+    "tests/test_plugin_integration.py: explicit UTF-8 and Chinese path fixture",
+    "examples/noise_ablation_experiment.py: deterministic script"
+  ],
+  "test_result": {
+    "tests": 218,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "live_api_calls": 0,
+  "source": [
+    {
+      "path": "core/experimental/runtime.py",
+      "tested_sha256": "a33ae712807b5e87cdf921cd17f318b2f249355727a257d7d6e75f637632cd56",
+      "published_git_blob_sha256": "3d4e6fd0eebd3a86621b41e9ee7695cfd92b446371610702bcb238f23b759ab1",
+      "tested_bytes": 13656
+    },
+    {
+      "path": "core/experimental/coordination.py",
+      "tested_sha256": "24bcec81574a73f254a327bdeabdfef089c55ccdc47c18a24c0792b2f3d55fec",
+      "published_git_blob_sha256": "5cc9a8d8541f951f1743dfef9fab83d571e455c1a1630c71e6cd11411be1a917",
+      "tested_bytes": 6186
+    },
+    {
+      "path": "core/long_horizon/store.py",
+      "tested_sha256": "cc8679eb6229b3c2262351cfc95b08792d7c6142a815aa4341e2e0cf0ee61807",
+      "published_git_blob_sha256": "d2e2986b463fc643f4d91666193fa5049191f3568d63f237d09adcacf52a0915",
+      "tested_bytes": 8495
+    },
+    {
+      "path": "core/orchestrator.py",
+      "tested_sha256": "f07a84f8b81829470cdddc06abbf9990ac9b30b294de818f0f13da61a40d9138",
+      "published_git_blob_sha256": "d5931d04d5b558f6ef8c07d02be1fbd3b121d3c3e58f626eb7f97ceea21befd9",
+      "tested_bytes": 7363
+    },
+    {
+      "path": "core/tool_calling_agent.py",
+      "tested_sha256": "711b09316955eab44aa8c9cfd726ad4dc868aa58863e295a3509684654d32985",
+      "published_git_blob_sha256": "af5de2e478a3b90fca4767d5cdae1bb86b3ab4a2ce4b848b7b90761ecce938cc",
+      "tested_bytes": 9759
+    },
+    {
+      "path": "ui.py",
+      "tested_sha256": "3fef25ea446031d2515f4c7025169f5df4e5b90e4a39e1d4b24034eb833ceba1",
+      "published_git_blob_sha256": "d3cd94eb2302e3f4f33c78ea61bfb217b60cf54a52d71819ffb7e319991049ff",
+      "tested_bytes": 110967
+    },
+    {
+      "path": "tests/test_plugin_integration.py",
+      "tested_sha256": "d86ec2127dff1839927eda8930c8ce0fca8d9a44b9945e6172f473891e6b0df5",
+      "published_git_blob_sha256": "d86ec2127dff1839927eda8930c8ce0fca8d9a44b9945e6172f473891e6b0df5",
+      "tested_bytes": 11368
+    },
+    {
+      "path": "scripts/export_api_baseline.py",
+      "tested_sha256": "b9ed02113df01d065ba94749020d81537d2e2374681fab52bd0ce8747f14dfdf",
+      "published_git_blob_sha256": "ab0cac94eb839beef0546b42bd67f385337008d4cea29de637fb58f9cde0244e",
+      "tested_bytes": 9212
+    },
+    {
+      "path": "examples/noise_ablation_experiment.py",
+      "tested_sha256": "1259ec9b913fd1037a33003bce28434af4c65db618e177ba353101e5df50ecc0",
+      "published_git_blob_sha256": "1259ec9b913fd1037a33003bce28434af4c65db618e177ba353101e5df50ecc0",
+      "tested_bytes": 9952
+    }
+  ],
+  "evidence": [
+    {
+      "path": "communication_example.txt",
+      "sha256": "5856f96edf835b959410756f63ee746092ba856f19b3a48a1c5baf2546a82af2",
+      "bytes": 573,
+      "original_sha256": "5856f96edf835b959410756f63ee746092ba856f19b3a48a1c5baf2546a82af2",
+      "whitespace_normalized": false
+    },
+    {
+      "path": "communication_result.json",
+      "sha256": "99783ef94bd87020939748c14da79343d19e74bcd5aca923729b306dbc13938f",
+      "bytes": 1087,
+      "original_sha256": "99783ef94bd87020939748c14da79343d19e74bcd5aca923729b306dbc13938f",
+      "whitespace_normalized": false
+    },
+    {
+      "path": "pytest_output.txt",
+      "sha256": "e9457b7b1fb7cdd904ed41536a1f46c06108cb771bccb5ad1b02460c70bf1645",
+      "bytes": 346,
+      "original_sha256": "e9457b7b1fb7cdd904ed41536a1f46c06108cb771bccb5ad1b02460c70bf1645",
+      "whitespace_normalized": false
+    },
+    {
+      "path": "pytest_output_initial.txt",
+      "sha256": "581cf0e3e2ce3acaf3015566ee7b94135a5ea49929c3b4de59b76fa9f34a810a",
+      "bytes": 2567,
+      "original_sha256": "35a3144c03f2d52aec2937cbcb1eaa0cdb67d6795eed4b05530e6d51b284711c",
+      "whitespace_normalized": true
+    },
+    {
+      "path": "pytest_results.xml",
+      "sha256": "b0f0713464fe80a50dd5dffbf80e8a17fdc938836417b4d7b0d1a6c8519a6a2a",
+      "bytes": 28282,
+      "original_sha256": "b0f0713464fe80a50dd5dffbf80e8a17fdc938836417b4d7b0d1a6c8519a6a2a",
+      "whitespace_normalized": false
+    },
+    {
+      "path": "pytest_results_initial.xml",
+      "sha256": "c75f4716258aba5b21fa0f6c3bfaf22c820886495b3cd77cc358d6c2ba50cc45",
+      "bytes": 30066,
+      "original_sha256": "d4d1fd2e87b7b07e1f55c86bddbf026a0abc8706ebe84b87a8099d5cdc933a1c",
+      "whitespace_normalized": true
+    }
+  ],
+  "note": "Clean Git export plus listed changes. Source content matches staged publication after CRLF/LF normalization; exact tested bytes and published Git blob hashes retained separately. Initial locale-related failure retained. No historical API results reclassified; no API OFF/ON effect claim."
+}
