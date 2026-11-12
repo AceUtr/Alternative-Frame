@@ -9,6 +9,8 @@ from ..models import Plan, utc_now
 from ..orchestrator import Orchestrator, RunReport
 from ..local_recovery import LocalDAGRecoveryController
 from .evaluator import GoalEvaluation, ReportStatusEvaluator
+from .acceptance_contract import AcceptanceContract
+from .runtime_changes import RuntimeChangeInbox
 from .state import LongHorizonState, PhaseRecord, plan_from_dict, plan_to_dict
 from .store import LongHorizonStore
 
@@ -45,6 +47,7 @@ class LongHorizonController:
         acceptance_contract: Optional[dict] = None,
         local_recovery: LocalDAGRecoveryController | None = None,
         workspace_path: str | None = None,
+        runtime_change_inbox: RuntimeChangeInbox | None = None,
     ):
         if max_phases < 1 or max_total_tasks < 1:
             raise ValueError("long-horizon budgets must be positive")
@@ -59,6 +62,7 @@ class LongHorizonController:
         self.acceptance_contract = acceptance_contract
         self.local_recovery = local_recovery
         self.workspace_path = workspace_path
+        self.runtime_change_inbox = runtime_change_inbox
         self._pause_requested = Event()
         self._current_run_id = ""
         self._active_phase = 0
@@ -98,6 +102,11 @@ class LongHorizonController:
         run_id = run_id or uuid4().hex[:12]
         self._current_run_id = run_id
         state = self._load_or_create(goal.strip(), run_id, resume)
+        if self.runtime_change_inbox:
+            if not callable(getattr(self.evaluator, "update_contract", None)):
+                raise ValueError("runtime changes require a contract-aware evaluator with update_contract")
+            self.runtime_change_inbox.open(state)
+            self.evaluator.update_contract(AcceptanceContract.from_dict(state.acceptance_contract))
         phase_reports: List[RunReport] = []
         if resume:
             self._pause_requested.clear()
@@ -116,6 +125,12 @@ class LongHorizonController:
         state.status = "running"
         state.last_error = None
         self._persist(state, "run_started", {"resume": resume})
+        if self.runtime_change_inbox:
+            self._persist(state, "runtime_change_inbox_ready", {
+                "pending_path": str(self.runtime_change_inbox.pending),
+                "contract_revision": state.contract_revision,
+                "boundary": "after_phase_execution_before_final_acceptance",
+            })
         if state.phase >= state.max_phases:
             state.status = "budget_exhausted"
             state.last_error = "max_phases_exceeded"
@@ -197,22 +212,10 @@ class LongHorizonController:
                     state.pending_plan = plan_to_dict(plan)
                     self._persist(state, "run_interrupted", {"phase": phase_number, "reason": interruption, "status": state.status})
                     break
-                evaluation = self.evaluator.evaluate(state, plan, report)
-                if evaluation.reason == "semantic global evaluation unavailable or invalid":
-                    state.status = "paused"
-                    state.last_error = "global_evaluation_pending"
-                    self._persist(state, "run_interrupted", {"phase": phase_number, "status": state.status, "reason": state.last_error})
-                    break
-                self._record_phase(state, phase_number, plan, report, evaluation)
-                state.pending_plan = None
-                state.last_evaluation = evaluation.to_dict()
-                state.phase = phase_number
-                self._persist(state, "phase_finished", {"phase": phase_number, **evaluation.to_dict()})
-
-                if evaluation.completed:
-                    state.status = "completed"
-                    state.decisions.append(f"phase {phase_number}: final goal accepted - {evaluation.reason}")
-                    self._persist(state, "run_completed", {"phase": phase_number})
+                evaluation, phase_terminal = self._evaluate_and_commit_phase(
+                    state, phase_number, plan, report
+                )
+                if phase_terminal:
                     break
 
                 state.decisions.append(f"phase {phase_number}: continue - {evaluation.reason}")
@@ -232,6 +235,87 @@ class LongHorizonController:
             raise
 
         return LongHorizonReport(state, phase_reports)
+
+    def _evaluate_and_commit_phase(self, state, phase_number, plan, report):
+        """Evaluate outside the inbox lock, then atomically settle against its latest request."""
+        while True:
+            self._apply_runtime_changes(state)
+            evaluation = self.evaluator.evaluate(state, plan, report)
+
+            if self.runtime_change_inbox:
+                with self.runtime_change_inbox.lock():
+                    if self._apply_runtime_changes(state, lock_held=True):
+                        continue
+                    return self._commit_phase_evaluation(
+                        state, phase_number, plan, report, evaluation
+                    )
+            return self._commit_phase_evaluation(state, phase_number, plan, report, evaluation)
+
+    def _commit_phase_evaluation(self, state, phase_number, plan, report, evaluation):
+        if evaluation.reason == "semantic global evaluation unavailable or invalid":
+            state.status = "paused"
+            state.last_error = "global_evaluation_pending"
+            self._persist(state, "run_interrupted", {
+                "phase": phase_number,
+                "status": state.status,
+                "reason": state.last_error,
+            })
+            return evaluation, True
+
+        self._record_phase(state, phase_number, plan, report, evaluation)
+        state.pending_plan = None
+        state.last_evaluation = evaluation.to_dict()
+        state.phase = phase_number
+        self._persist(state, "phase_finished", {
+            "phase": phase_number,
+            "contract_revision": state.contract_revision,
+            **evaluation.to_dict(),
+        })
+
+        if evaluation.completed:
+            state.status = "completed"
+            state.decisions.append(f"phase {phase_number}: final goal accepted - {evaluation.reason}")
+            self._persist(state, "run_completed", {
+                "phase": phase_number,
+                "contract_revision": state.contract_revision,
+            })
+            return evaluation, True
+        return evaluation, False
+
+    def _apply_runtime_changes(self, state: LongHorizonState, *, lock_held: bool = False) -> bool:
+        inbox = self.runtime_change_inbox
+        if inbox is None:
+            return False
+        if not lock_held:
+            with inbox.lock():
+                return self._apply_runtime_changes(state, lock_held=True)
+        changed = False
+        for path in inbox.pending_paths():
+            try:
+                updated, record = inbox.prepare(path, state)
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                rejected = inbox.reject(path, f"{type(exc).__name__}: {exc}")
+                self._persist(state, "runtime_change_rejected", rejected)
+                continue
+            if updated is None:
+                inbox.acknowledge(path, record["request_sha256"])
+                self._persist(state, "runtime_change_duplicate_ignored", {
+                    "request_id": record["request_id"],
+                    "revision": record["revision"],
+                })
+                continue
+            self.evaluator.update_contract(AcceptanceContract.from_dict(updated))
+            state.acceptance_contract = updated
+            self.acceptance_contract = updated
+            state.contract_revision = record["revision"]
+            state.runtime_changes.append(record)
+            state.decisions.append(
+                f"runtime change {record['request_id']} applied at contract revision {record['revision']}: {record['description']}"
+            )
+            self._persist(state, "runtime_change_applied", record)
+            inbox.acknowledge(path, record["request_sha256"])
+            changed = True
+        return changed
 
     @staticmethod
     def _interruption_reason(report):
@@ -330,6 +414,7 @@ class LongHorizonController:
                 finished_at=report.finished_at,
                 local_recovery_cycles=report.local_recovery_cycles,
                 executed_task_count=report.executed_task_count,
+                contract_revision=state.contract_revision,
             )
         )
 

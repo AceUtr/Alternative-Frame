@@ -29,21 +29,29 @@ The verifier reconstructs run/task identity and event ordering, checks that Clou
 
 ## Dynamic Requirement-Change Control
 
-Run the separate mid-run requirement-change scenario:
+The regular long-horizon UI now accepts a run-scoped additive condition using `追加运行中要求`. It updates the persisted acceptance contract and is consumed after the current phase finishes. When the new condition is unmet, the controller records the phase as incomplete and invokes the normal replanner. It never removes existing criteria.
+
+Run the controlled acceptance, which uses a separate process to submit a request through the same inbox API as the UI:
+
+```powershell
+python -m core.long_horizon.runtime_change_acceptance --evidence-dir runs/runtime_change_acceptance
+```
+
+The output includes `summary.json`, `manifest.json`, controller state/events, accepted contract snapshots, injector events, and the baseline/final artifacts. Verify it separately:
+
+```powershell
+python -m core.long_horizon.runtime_change_acceptance --verify runs/runtime_change_acceptance/<run-id>
+```
+
+This run tests additive contract revision, stale-completion rejection, replanning, and baseline retention in the main controller. It uses deterministic agents on one host and does not make a live-API or second-device claim.
+
+The older dedicated demo remains available for its historical acceptance format:
 
 ```powershell
 python -m core.long_horizon.dynamic_change_demo --evidence-dir runs/dynamic_requirement_change
 ```
 
-The external injector waits for successful creation of `baseline_report.json`, then atomically publishes revision 2 of the acceptance request. The inbox monitor records detection. `LongHorizonController` must schedule phase 2, write `revised_report.json`, and leave the original baseline byte-for-byte unchanged.
-
-Run the independent verifier:
-
-```powershell
-python -m core.long_horizon.dynamic_change_demo --verify-run runs/dynamic_requirement_change/<run-id> --output runs/dynamic_requirement_change/<run-id>/acceptance_verification.json
-```
-
-This is a deterministic local control for dynamic requirement updates. It does not claim that an LLM understood an arbitrary natural-language change.
+The older demo is not a substitute for the main-controller runtime-change verifier above. Neither control claims that an LLM understands arbitrary natural-language changes.
 
 ## Two-Computer Fault Run
 

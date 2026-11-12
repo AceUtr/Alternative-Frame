@@ -34,6 +34,7 @@ class PhaseRecord:
     finished_at: str = ""
     local_recovery_cycles: int = 0
     executed_task_count: int = 0
+    contract_revision: int = 1
 
 
 @dataclass
@@ -50,6 +51,8 @@ class LongHorizonState:
     artifacts: List[str] = field(default_factory=list)
     evidence_records: List[Dict[str, Any]] = field(default_factory=list)
     acceptance_contract: Dict[str, Any] | None = None
+    contract_revision: int = 1
+    runtime_changes: List[Dict[str, Any]] = field(default_factory=list)
     workspace_path: str | None = None
     decisions: List[str] = field(default_factory=list)
     phases: List[PhaseRecord] = field(default_factory=list)

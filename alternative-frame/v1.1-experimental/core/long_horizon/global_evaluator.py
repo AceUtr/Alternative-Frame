@@ -31,6 +31,9 @@ class StructuredGlobalEvaluator:
         self.max_attempts = max_attempts
         self.on_event = on_event
 
+    def update_contract(self, contract: AcceptanceContract) -> None:
+        self.contract = contract
+
     def evaluate(self, state: LongHorizonState, plan: Plan, report: RunReport) -> GoalEvaluation:
         bundle = EvidenceBundle.collect(state, report)
         hard = self.hard_gate.evaluate(self.contract, bundle)
@@ -206,6 +209,9 @@ class DeterministicGlobalEvaluator:
         self.contract = contract
         self.hard_gate = HardEvidenceGate(workspace)
         self.on_event = on_event
+
+    def update_contract(self, contract: AcceptanceContract) -> None:
+        self.contract = contract
 
     def evaluate(self, state: LongHorizonState, plan: Plan, report: RunReport) -> GoalEvaluation:
         bundle = EvidenceBundle.collect(state, report)

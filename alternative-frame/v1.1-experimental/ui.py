@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Dict
+from uuid import uuid4
 
 from core.agents import AgentRegistry, DeterministicAgent
 from core.acceptance import AcceptanceEvaluator
@@ -34,6 +35,7 @@ from core.long_horizon import (
     DeterministicRecoveryPlanner,
 )
 from core.long_horizon.state import plan_from_dict
+from core.long_horizon.runtime_changes import RuntimeChangeInbox, submit_change
 from core.tool_calling_agent import ToolCallingAgent
 from core.main_agent import MainAgent
 from core.model_client import ModelConfig, OpenAICompatibleClient
@@ -738,6 +740,8 @@ class FreshUI(tk.Tk):
         self.events = queue.Queue()
         self.running = False
         self.active_controller = None
+        self.active_run_id = None
+        self.runtime_change_pending = False
         self.artifacts_dir: Path | None = None
         self.task_items: Dict[str, str] = {}
         self.dag_nodes = {}
@@ -883,6 +887,21 @@ class FreshUI(tk.Tk):
         self.pause_btn.pack(side=tk.RIGHT, padx=(0, 8))
         ttk.Button(actions, text="运行历史", style="Soft.TButton", command=self.show_run_history).pack(side=tk.RIGHT, padx=(0, 8))
         ttk.Button(actions, text="端边云视图", style="Soft.TButton", command=self.show_runtime_view).pack(side=tk.RIGHT, padx=(0, 8))
+        runtime_change_row = tk.Frame(inner, bg=COLORS["card"])
+        runtime_change_row.pack(fill=tk.X, pady=(8, 0))
+        self.runtime_change_btn = ttk.Button(
+            runtime_change_row,
+            text="追加运行中要求",
+            style="Soft.TButton",
+            command=self.show_runtime_change_dialog,
+            state=tk.DISABLED,
+        )
+        self.runtime_change_btn.pack(side=tk.LEFT)
+        tk.Label(
+            runtime_change_row,
+            text="仅追加验收条件；当前阶段完成后按新条件重新验收",
+            bg=COLORS["card"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 8),
+        ).pack(side=tk.LEFT, padx=(10, 0))
 
     def _toggle_developer_modes(self):
         values = DEFAULT_EXECUTION_MODES + DEVELOPER_EXECUTION_MODES if self.developer_mode.get() else DEFAULT_EXECUTION_MODES
@@ -1287,6 +1306,9 @@ class FreshUI(tk.Tk):
             )
             return
         run_id = __import__("uuid").uuid4().hex[:12] if execution_mode in ("长程任务", "标准多 Agent") else None
+        self.active_run_id = run_id if execution_mode == "长程任务" else None
+        self.runtime_change_pending = False
+        self.runtime_change_btn.configure(state=tk.DISABLED)
         workspace_path = None
         if execution_mode in ("长程任务", "标准多 Agent"):
             self.workspace_override = task_workspace(
@@ -1332,6 +1354,102 @@ class FreshUI(tk.Tk):
         self.pause_btn.configure(state=tk.DISABLED)
         self._set_state("已请求暂停，等待当前阶段安全结束", COLORS["blue_dark"])
         self.append_log("LONG → 已请求在当前阶段边界安全暂停")
+
+    def show_runtime_change_dialog(self):
+        if not self.running or not self.active_run_id or self.runtime_change_pending:
+            return
+        run_dir = LongHorizonStore(long_horizon_runs_root()).run_dir(self.active_run_id)
+        try:
+            state = LongHorizonStore(long_horizon_runs_root()).load(self.active_run_id)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            messagebox.showerror("无法读取运行状态", str(exc), parent=self)
+            return
+        if state.status != "running":
+            messagebox.showinfo("当前阶段不可提交", "任务已离开运行状态；请在长程任务运行期间提交变更。", parent=self)
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title("追加运行中验收条件")
+        dialog.geometry("590x300")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        body = tk.Frame(dialog, bg=COLORS["bg"], padx=20, pady=16)
+        body.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(body, text="追加验收条件", style="Hero.TLabel").pack(anchor=tk.W)
+        tk.Label(
+            body,
+            text=f"运行 {state.run_id} · 合同版本 {state.contract_revision}。原有条件会保留。",
+            bg=COLORS["bg"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 9),
+        ).pack(anchor=tk.W, pady=(3, 14))
+
+        form = tk.Frame(body, bg=COLORS["bg"])
+        form.pack(fill=tk.X)
+        tk.Label(form, text="新增要求", bg=COLORS["bg"], fg=COLORS["text"], width=12, anchor=tk.W).grid(row=0, column=0, sticky=tk.W, pady=5)
+        description = tk.StringVar()
+        ttk.Entry(form, textvariable=description, width=58).grid(row=0, column=1, sticky=tk.EW, pady=5)
+        tk.Label(form, text="检查方式", bg=COLORS["bg"], fg=COLORS["text"], width=12, anchor=tk.W).grid(row=1, column=0, sticky=tk.W, pady=5)
+        check_type = tk.StringVar(value="semantic")
+        check_box = ttk.Combobox(form, textvariable=check_type, state="readonly", values=("semantic", "file_exists"), width=18)
+        check_box.grid(row=1, column=1, sticky=tk.W, pady=5)
+        tk.Label(form, text="相对文件路径", bg=COLORS["bg"], fg=COLORS["text"], width=12, anchor=tk.W).grid(row=2, column=0, sticky=tk.W, pady=5)
+        artifact_path = tk.StringVar()
+        path_entry = ttk.Entry(form, textvariable=artifact_path, width=58, state=tk.DISABLED)
+        path_entry.grid(row=2, column=1, sticky=tk.EW, pady=5)
+        form.columnconfigure(1, weight=1)
+
+        def update_path_state(_event=None):
+            path_entry.configure(state=tk.NORMAL if check_type.get() == "file_exists" else tk.DISABLED)
+
+        check_box.bind("<<ComboboxSelected>>", update_path_state)
+        tk.Label(
+            body,
+            text="提交后会在当前阶段边界接收；如果任务已完成，系统会拒绝变更。",
+            bg=COLORS["bg"], fg=COLORS["muted"], font=("Microsoft YaHei UI", 8),
+        ).pack(anchor=tk.W, pady=(10, 6))
+        buttons = tk.Frame(body, bg=COLORS["bg"])
+        buttons.pack(fill=tk.X, pady=(8, 0))
+        ttk.Button(buttons, text="取消", style="Soft.TButton", command=dialog.destroy).pack(side=tk.RIGHT)
+
+        def submit():
+            text = description.get().strip()
+            if not text:
+                messagebox.showwarning("需要填写要求", "请填写一条清晰、可验收的新要求。", parent=dialog)
+                return
+            kind = check_type.get()
+            criterion = {
+                "id": f"runtime_{uuid4().hex[:12]}",
+                "description": text,
+                "check_type": kind,
+                "required": True,
+            }
+            if kind == "file_exists":
+                criterion["path"] = artifact_path.get().strip()
+            request = {
+                "schema_version": 1,
+                "run_id": state.run_id,
+                "request_id": f"change-{uuid4().hex[:16]}",
+                "base_revision": state.contract_revision,
+                "description": text,
+                "add_criteria": [criterion],
+                "add_constraints": [],
+            }
+            try:
+                request_path = submit_change(run_dir, request)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                messagebox.showerror("变更未提交", str(exc), parent=dialog)
+                return
+            self.runtime_change_pending = True
+            self.runtime_change_btn.configure(state=tk.DISABLED)
+            self.append_log(f"运行中要求已排队 → {request_path}")
+            dialog.destroy()
+            messagebox.showinfo(
+                "变更已排队",
+                f"系统会在阶段边界接收并重新验收。\n\n可追溯文件：\n{request_path}",
+                parent=self,
+            )
+
+        ttk.Button(buttons, text="提交要求", style="Accent.TButton", command=submit).pack(side=tk.RIGHT, padx=(0, 8))
 
     def show_run_history(self):
         RunHistoryDialog(self, LongHorizonStore(long_horizon_runs_root()), self.resume_run)
@@ -1400,6 +1518,9 @@ class FreshUI(tk.Tk):
         self.goal.delete("1.0", tk.END)
         self.goal.insert("1.0", state.goal)
         self.execution_mode.set("长程任务")
+        self.active_run_id = state.run_id
+        self.runtime_change_pending = False
+        self.runtime_change_btn.configure(state=tk.DISABLED)
         self.running = True
         self.run_btn.configure(state=tk.DISABLED)
         self.clear_log()
@@ -1703,6 +1824,7 @@ class FreshUI(tk.Tk):
                     on_event=on_long_event,
                     acceptance_contract=contract.to_dict(),
                     workspace_path=str(workspace),
+                    runtime_change_inbox=RuntimeChangeInbox(store.run_dir(long_run_id) / "runtime_changes"),
                     local_recovery=LocalDAGRecoveryController(
                         orchestrator,
                         max_cycles=1,
@@ -1829,10 +1951,15 @@ class FreshUI(tk.Tk):
                         self._set_state("环境预检失败，任务未启动", COLORS["danger"])
                 elif kind == "controller_ready":
                     self.pause_btn.configure(state=tk.NORMAL)
+                    if self.active_run_id and not self.runtime_change_pending:
+                        self.runtime_change_btn.configure(state=tk.NORMAL)
                 elif kind == "run_cancelled":
                     self.append_log(f"CONTRACT → {payload}")
                     self.running = False
                     self.active_controller = None
+                    self.active_run_id = None
+                    self.runtime_change_pending = False
+                    self.runtime_change_btn.configure(state=tk.DISABLED)
                     self.run_btn.configure(state=tk.NORMAL)
                     self.pause_btn.configure(state=tk.DISABLED)
                     self._set_state("任务已取消", COLORS["muted"])
@@ -1842,6 +1969,9 @@ class FreshUI(tk.Tk):
                     self.append_log("ERROR → " + payload)
                     self.running = False
                     self.active_controller = None
+                    self.active_run_id = None
+                    self.runtime_change_pending = False
+                    self.runtime_change_btn.configure(state=tk.DISABLED)
                     self.run_btn.configure(state=tk.NORMAL)
                     self.pause_btn.configure(state=tk.DISABLED)
                     self._set_state("任务失败", COLORS["danger"])
@@ -1864,6 +1994,9 @@ class FreshUI(tk.Tk):
             self.append_log("产物验收未通过；工作目录保留供检查，本次不标记为已发布。")
         self.running = False
         self.active_controller = None
+        self.active_run_id = None
+        self.runtime_change_pending = False
+        self.runtime_change_btn.configure(state=tk.DISABLED)
         self.run_btn.configure(state=tk.NORMAL)
         self.pause_btn.configure(state=tk.DISABLED)
         color = COLORS["success"] if report.status == "success" else COLORS["danger"]
@@ -1939,6 +2072,21 @@ class FreshUI(tk.Tk):
         event, detail = payload
         if event == "run_started":
             self.append_log("长程任务 → 控制器已启动")
+        elif event == "runtime_change_inbox_ready":
+            self.append_log(f"运行中需求变更 → 收件目录：{detail.get('pending_path', '')}")
+        elif event == "runtime_change_applied":
+            self.runtime_change_pending = False
+            if self.running and self.active_run_id:
+                self.runtime_change_btn.configure(state=tk.NORMAL)
+            self.append_log(
+                f"需求变更已接收 → 合同版本 {detail.get('revision', '?')} · "
+                f"{detail.get('description', '')}；将按新合同验收并继续规划"
+            )
+        elif event == "runtime_change_rejected":
+            self.runtime_change_pending = False
+            if self.running and self.active_run_id:
+                self.runtime_change_btn.configure(state=tk.NORMAL)
+            self.append_log(f"需求变更未应用 → {detail.get('reason', '')}")
         elif event == "phase_planned":
             phase = detail.get("phase", "?")
             for item in self.tree.get_children():
@@ -2033,6 +2181,9 @@ class FreshUI(tk.Tk):
             self.append_log(f"API 用量记录 → {usage_path}")
         self.running = False
         self.active_controller = None
+        self.active_run_id = None
+        self.runtime_change_pending = False
+        self.runtime_change_btn.configure(state=tk.DISABLED)
         self.run_btn.configure(state=tk.NORMAL)
         self.pause_btn.configure(state=tk.DISABLED)
         color = (

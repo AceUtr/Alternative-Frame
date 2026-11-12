@@ -9,6 +9,7 @@ from .global_evaluator import DeterministicGlobalEvaluator, StructuredGlobalEval
 from .initial_planner import ArtifactOwnershipValidator, InitialPlanError, RuleBasedContractPlanner, StructuredInitialDAGGenerator
 from .replanner import PlanValidationError, PlanValidator, StructuredReplanError, StructuredReplanner
 from .recovery_planner import DeterministicRecoveryPlanner, ResilientReplanner
+from .runtime_changes import RuntimeChangeInbox, submit_change
 from .state import LongHorizonState, PhaseRecord
 from .store import LongHorizonStore
 
@@ -36,11 +37,13 @@ __all__ = [
     "PhaseRecord",
     "ReportStatusEvaluator",
     "ResilientReplanner",
+    "RuntimeChangeInbox",
     "RuleBasedContractPlanner",
     "StructuredReplanError",
     "StructuredReplanner",
     "StructuredGlobalEvaluator",
     "DeterministicGlobalEvaluator",
+    "submit_change",
     "StructuredContractError",
     "StructuredGoalContractGenerator",
     "StructuredInitialDAGGenerator",

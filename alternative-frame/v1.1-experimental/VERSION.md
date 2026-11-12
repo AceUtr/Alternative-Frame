@@ -6,6 +6,10 @@
 
 ## 本版本新增
 
+- `core/long_horizon/runtime_changes.py`：按 run ID 和合同修订号校验、归档并串行应用外部追加验收条件；拒绝越界文件路径和过期请求。
+- `core/long_horizon/runtime_change_acceptance.py`：由独立本地注入进程驱动主长程控制器的动态合同更新、再验收和阶段重规划，输出带 SHA-256 清单的控制证据。
+- `ui.py`：API/Stub 长程任务可在运行时通过“追加运行中要求”提交语义条件或必需产物路径。
+- `tests/test_runtime_changes.py`：覆盖完成竞态、合同修订一致性、非法请求和独立进程动态注入。
 - `core/experimental/adapters.py`：模型、工具、记忆和事件的最小 Adapter 协议，以及 JSONL 事件日志。
 - `core/experimental/cost_guard.py`：请求预留、实际 Token 对账、请求数/Token/美元预算限制。
 - `core/experimental/coordination.py`：有界邻居消息总线和 SQLite 任务队列，支持 claim、lease、ACK、释放和过期租约回收。
@@ -38,4 +42,4 @@ python -m pytest -q
 
 ## 当前边界
 
-新增模块目前是 opt-in 原型，尚未接管现有 Orchestrator/UI/Demo 的运行链路；模型 fallback、人工 rubric 门禁、真实向量库和分布式网络传输也尚未接入。这不是完整自由拓扑群聊，也没有声称已经具备真实多设备端边云部署或供应商级账单。应先用单元测试和离线演示评估接口，再决定是否接入现有运行链路。
+插件治理模块仍是 opt-in 原型；动态运行中需求入口已接入主长程控制器和 `ui.py`。模型 fallback、人工 rubric 门禁、真实向量库和一般 Agent 间分布式网络传输尚未接入。这不是完整自由拓扑群聊；确定性动态变更控制证据也不能替代真实双机、Live API 质量或任意失败条件下的可靠性验收。真实双机只有在不同设备运行同一提交并通过严格 verifier 后才能宣称通过。
