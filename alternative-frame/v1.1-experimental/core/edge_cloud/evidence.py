@@ -84,6 +84,7 @@ def verify_run(
     *,
     require_cross_host: bool = False,
     require_edge_log: bool = False,
+    register_edge_log: bool = False,
 ) -> Verification:
     root = Path(run_dir).resolve()
     checks: dict[str, bool] = {}
@@ -236,8 +237,44 @@ def verify_run(
     elif not distinct_hosts:
         warnings.append("Cloud and Edge logs use the same host; classify this run as a loopback control")
 
+    expected_revision = (summary or {}).get("source_revision") or {}
+    expected_version = (expected_revision.get("commit"), expected_revision.get("working_tree_sha256"))
+    cloud_versions = {
+        ((item.get("source_revision") or {}).get("commit"), (item.get("source_revision") or {}).get("working_tree_sha256"))
+        for item in cloud_task_records
+    }
+    edge_versions = {
+        ((item.get("source_revision") or {}).get("commit"), (item.get("source_revision") or {}).get("working_tree_sha256"))
+        for item in edge_task_records
+    }
+    source_revisions_match = bool(
+        expected_version[0] and expected_version[1]
+        and cloud_versions == {expected_version}
+        and edge_versions == {expected_version}
+    )
+    check("cloud_and_edge_source_revisions_match", source_revisions_match,
+          "Cloud/Edge worker source commit or working-tree fingerprint does not match the framework run")
+
     if isinstance(manifest, dict):
         records = manifest.get("files", [])
+        edge_log_path = root / "edge_worker_events.jsonl"
+        edge_record = next((
+            record for record in records
+            if isinstance(record, dict)
+            and str(record.get("path", "")).replace("\\", "/") == "edge_worker_events.jsonl"
+        ), None)
+        if register_edge_log and edge_log_path.is_file() and edge_record is None:
+            edge_record = {
+                "path": "edge_worker_events.jsonl",
+                "bytes": edge_log_path.stat().st_size,
+                "sha256": _sha256(edge_log_path),
+            }
+            records.append(edge_record)
+            manifest["files"] = records
+            (root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        checks["edge_log_registered_in_manifest"] = bool(edge_record)
+        if require_edge_log and not edge_record:
+            failures.append("edge_worker_events.jsonl must be registered in manifest.json for final acceptance")
         manifest_ok = True
         for record in records if isinstance(records, list) else []:
             if not isinstance(record, dict):
@@ -289,9 +326,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("run_dir", type=Path)
     parser.add_argument("--require-cross-host", action="store_true")
     parser.add_argument("--require-edge-log", action="store_true")
+    parser.add_argument("--register-edge-log", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
-    result = verify_run(args.run_dir, require_cross_host=args.require_cross_host, require_edge_log=args.require_edge_log)
+    result = verify_run(
+        args.run_dir,
+        require_cross_host=args.require_cross_host,
+        require_edge_log=args.require_edge_log,
+        register_edge_log=args.register_edge_log,
+    )
     output = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
     print(output)
     if args.output:

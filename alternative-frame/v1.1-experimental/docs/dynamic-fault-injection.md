@@ -25,7 +25,7 @@ The runner exits nonzero unless its execution checks pass. Verify the saved raw 
 python -m core.edge_cloud.evidence runs/dynamic_fault_injection/<run-id> --output runs/dynamic_fault_injection/<run-id>/acceptance_verification.json
 ```
 
-The verifier reconstructs run/task identity and event ordering, checks that Cloud started but did not finish the task, checks the same task failed over and completed on Edge, audits controller and artifact state, and verifies manifest size/hash records. The output warns when both nodes have the same host identity.
+The verifier reconstructs run/task identity and event ordering, checks that Cloud started but did not finish the task, checks the same task failed over and completed on Edge, confirms both workers ran the same source commit and working-tree fingerprint, audits controller and artifact state, and verifies manifest size/hash records. The output warns when both nodes have the same host identity.
 
 ## Dynamic Requirement-Change Control
 
@@ -72,10 +72,10 @@ runs/dynamic_fault_injection/<run-id>/edge_worker_events.jsonl
 Then run final bundle verification on A:
 
 ```powershell
-python -m core.edge_cloud.evidence runs/dynamic_fault_injection/<run-id> --require-edge-log --require-cross-host --output runs/dynamic_fault_injection/<run-id>/acceptance_verification.json
+python -m core.edge_cloud.evidence runs/dynamic_fault_injection/<run-id> --register-edge-log --require-edge-log --require-cross-host --output runs/dynamic_fault_injection/<run-id>/acceptance_verification.json
 ```
 
-The final check requires matching run/task IDs, Cloud and Edge event records, different hostnames and hashed host fingerprints, and intact evidence hashes. A successful HTTP request to a LAN address alone is not a two-computer acceptance. The verifier's result plus the copied Edge log and its reported SHA-256 are the reviewable evidence.
+The final check first registers the copied Edge log in `manifest.json`, then requires matching run/task IDs, Cloud and Edge event records, the same source commit and working-tree fingerprint, different hostnames and hashed host fingerprints, and intact evidence hashes. A successful HTTP request to a LAN address alone is not a two-computer acceptance. The verifier's result plus the copied Edge log and its reported SHA-256 are the reviewable evidence.
 
 ## Evidence Layout and Claim Boundary
 

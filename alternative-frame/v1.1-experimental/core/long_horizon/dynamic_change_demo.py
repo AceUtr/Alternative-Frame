@@ -16,6 +16,7 @@ from ..acceptance import AcceptanceEvaluator
 from ..agents import Agent, AgentRegistry
 from ..models import AgentResult, Plan, SubTask, utc_now
 from ..orchestrator import Orchestrator
+from ..source_revision import describe_source_revision, sha256_file
 from .controller import LongHorizonController
 from .evaluator import GoalEvaluation
 from .state import LongHorizonState
@@ -32,11 +33,7 @@ CHANGE_REQUEST = {
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return sha256_file(path)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -461,33 +458,16 @@ def run_experiment(evidence_root: Path, run_id: str | None = None, injection_del
 
 
 def _source_revision() -> dict[str, Any]:
-    try:
-        repo_root = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True).stdout.strip())
-        branch = subprocess.run(["git", "branch", "--show-current"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True).stdout.strip()
-        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True).stdout.strip()
-        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=repo_root, capture_output=True, text=True, check=True).stdout.splitlines()
-        dirty_files = []
-        for line in status:
-            relative = line[3:] if len(line) > 3 else ""
-            path = repo_root / relative
-            if path.is_file():
-                dirty_files.append({"path": relative.replace("\\", "/"), "sha256": _sha256(path)})
-        dirty_files.sort(key=lambda item: item["path"])
-        return {
-            "branch": branch,
-            "commit": commit,
-            "working_tree_clean": not status,
-            "dirty_files": dirty_files,
-            "working_tree_sha256": hashlib.sha256(json.dumps(dirty_files, sort_keys=True).encode("utf-8")).hexdigest(),
-        }
-    except (OSError, subprocess.CalledProcessError):
-        return {"branch": "unknown", "commit": "unknown", "working_tree_clean": False}
+    return describe_source_revision(PROJECT_ROOT)
 
 
 def verify_run(run_dir: str | Path) -> dict[str, Any]:
     root = Path(run_dir).resolve()
-    summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
-    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    try:
+        summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"run_id": None, "passed": False, "checks": {}, "failures": [f"invalid or missing summary/manifest: {type(exc).__name__}"]}
     failures = []
     hash_checks = []
     for row in manifest.get("files", []):
@@ -501,11 +481,15 @@ def verify_run(run_dir: str | Path) -> dict[str, Any]:
         if not valid:
             failures.append(f"manifest mismatch: {row.get('path')}")
     run_id = summary.get("run_id")
-    request = json.loads((root / "inbox/change_request.json").read_text(encoding="utf-8"))
+    run_id = summary.get("run_id")
+    try:
+        request = json.loads((root / "inbox/change_request.json").read_text(encoding="utf-8"))
+        state = json.loads((root / "framework_runs" / run_id / "state.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        return {"run_id": run_id, "passed": False, "checks": {}, "failures": [f"invalid or missing change request/state: {type(exc).__name__}"]}
     injected_events = _read_jsonl(root / "change_injector_events.jsonl")
     detected_events = _read_jsonl(root / "framework_change_events.jsonl")
     framework_events = _read_jsonl(root / "framework_runs" / run_id / "events.jsonl")
-    state = json.loads((root / "framework_runs" / run_id / "state.json").read_text(encoding="utf-8"))
     injected = next((row for row in injected_events if row.get("event") == "dynamic_requirement_injected"), None)
     detected = next((row for row in detected_events if row.get("event") == "dynamic_requirement_detected"), None)
     baseline_finished = next((
@@ -521,6 +505,10 @@ def verify_run(run_dir: str | Path) -> dict[str, Any]:
         and (row.get("payload") or {}).get("phase") == 2
         and any(task.get("id") == "apply_change" for task in (row.get("payload") or {}).get("tasks", []))
     ), None)
+    phase_two_task_ids = [
+        task.get("id") for task in ((phase_two_plan or {}).get("payload") or {}).get("tasks", [])
+        if isinstance(task, dict)
+    ]
     baseline_path = root / "workspace/artifacts/baseline_report.json"
     revised_path = root / "workspace/artifacts/revised_report.json"
     baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.is_file() else {}
@@ -537,7 +525,11 @@ def verify_run(run_dir: str | Path) -> dict[str, Any]:
             injected and detected and injected.get("request_id") == detected.get("request_id")
             and injected.get("injected_at", "") <= detected.get("detected_at", "")
         ),
-        "controller_planned_second_phase": phase_two_plan is not None,
+        "controller_planned_second_phase_without_repeating_baseline": (
+            phase_two_plan is not None
+            and "apply_change" in phase_two_task_ids
+            and "prepare_baseline" not in phase_two_task_ids
+        ),
         "baseline_retained": bool(baseline.get("revision") == 1 and injected and injected.get("baseline_sha256_at_injection") == _sha256(baseline_path)),
         "new_criterion_satisfied": bool(
             revised.get("revision") == request.get("new_revision")

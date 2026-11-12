@@ -20,6 +20,7 @@ from ..agents import Agent, AgentRegistry
 from ..long_horizon import LongHorizonController, LongHorizonStore
 from ..models import AgentResult, Plan, SubTask, utc_now
 from ..orchestrator import Orchestrator
+from ..source_revision import describe_source_revision, sha256_file
 from .agent import RemoteNode, RoutedRemoteAgent
 
 
@@ -145,11 +146,7 @@ def _terminate(process: subprocess.Popen | None) -> None:
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return sha256_file(path)
 
 
 def _elapsed_ms(start: str, end: str) -> float | None:
@@ -174,40 +171,7 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 
 def _git_revision() -> dict:
-    try:
-        repo_root = Path(subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"], cwd=PROJECT_ROOT,
-            capture_output=True, text=True, check=True,
-        ).stdout.strip())
-        branch = subprocess.run(
-            ["git", "branch", "--show-current"], cwd=PROJECT_ROOT,
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT,
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=all"], cwd=repo_root,
-            capture_output=True, text=True, check=True,
-        ).stdout.splitlines()
-        files = []
-        for line in status:
-            relative = line[3:] if len(line) > 3 else ""
-            path = repo_root / relative
-            if path.is_file():
-                files.append({"path": relative.replace("\\", "/"), "sha256": _sha256(path)})
-        files.sort(key=lambda item: item["path"])
-        tree_material = json.dumps(files, sort_keys=True, ensure_ascii=False).encode("utf-8")
-        return {
-            "branch": branch,
-            "commit": commit,
-            "working_tree_clean": not status,
-            "working_tree_sha256": hashlib.sha256(tree_material).hexdigest(),
-            "dirty_files": files,
-        }
-    except (OSError, subprocess.CalledProcessError):
-        return {"branch": "unknown", "commit": "unknown"}
+    return describe_source_revision(PROJECT_ROOT)
 
 
 def run_experiment(
@@ -245,6 +209,9 @@ def run_experiment(
         edge_health = _wait_health(edge_url, edge_process)
         if edge_health.get("role") != "edge":
             raise RuntimeError("the configured fallback endpoint did not identify itself as an Edge worker")
+        framework_revision = _git_revision()
+        if edge_health.get("source_revision") != framework_revision:
+            raise RuntimeError("Edge worker source revision or working-tree fingerprint does not match the framework")
 
         cloud_process, cloud_stdout, cloud_event_path, cloud_url = _start_worker(
             "cloud", "cloud-01", _free_port(), cloud_delay_seconds, run_dir, token, "127.0.0.1",
@@ -253,6 +220,8 @@ def run_experiment(
         cloud_health = _wait_health(cloud_url, cloud_process)
         if cloud_health.get("role") != "cloud":
             raise RuntimeError("the primary endpoint did not identify itself as a Cloud worker")
+        if cloud_health.get("source_revision") != framework_revision:
+            raise RuntimeError("Cloud worker source revision or working-tree fingerprint does not match the framework")
 
         injector_log = run_dir / "injector_events.jsonl"
         injector_stdout = (run_dir / "injector_stdout.log").open("ab")
@@ -283,8 +252,8 @@ def run_experiment(
         registry = AgentRegistry()
         registry.register(RoutedRemoteAgent(
             [
-                RemoteNode(cloud_health["node_id"], cloud_health["role"], cloud_url),
-                RemoteNode(edge_health["node_id"], edge_health["role"], edge_url),
+                RemoteNode(cloud_health["node_id"], cloud_health["role"], cloud_url, cloud_health["source_revision"]),
+                RemoteNode(edge_health["node_id"], edge_health["role"], edge_url, edge_health["source_revision"]),
             ],
             token=token,
             run_id=run_id,

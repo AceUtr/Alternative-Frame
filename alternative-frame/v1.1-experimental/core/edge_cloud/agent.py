@@ -16,6 +16,7 @@ class RemoteNode:
     node_id: str
     role: str
     base_url: str
+    source_revision: dict | None = None
 
     @property
     def execute_url(self) -> str:
@@ -83,6 +84,7 @@ class RoutedRemoteAgent(Agent):
                     or result.get("node_id") != node.node_id
                     or result.get("node_role") != node.role
                     or not re.fullmatch(r"[0-9a-f]{64}", str(result.get("digest", "")))
+                    or (node.source_revision is not None and result.get("source_revision") != node.source_revision)
                 ):
                     raise ValueError("remote response failed run/task identity validation")
                 expected_digest = task.metadata.get("expected_remote_digest")
@@ -114,6 +116,7 @@ class RoutedRemoteAgent(Agent):
                             "node_role": node.role,
                             "host": result.get("host"),
                             "host_fingerprint": result.get("host_fingerprint"),
+                            "source_revision": result.get("source_revision"),
                             "digest": result.get("digest"),
                         },
                     }],

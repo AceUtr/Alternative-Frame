@@ -64,6 +64,10 @@ def test_external_process_failure_recovers_inside_main_long_horizon_controller(t
     verification = verify_run(run_dir)
     assert verification.passed is True
     assert verification.checks["injector_targeted_the_logged_worker"] is True
+    assert verification.checks["cloud_and_edge_source_revisions_match"] is True
+    strict_verification = verify_run(run_dir, require_edge_log=True, require_cross_host=True)
+    assert strict_verification.passed is False
+    assert any("cross-host claim" in failure for failure in strict_verification.failures)
 
 
 def test_independent_verifier_rejects_tampered_edge_log(tmp_path):
@@ -98,6 +102,7 @@ def test_external_requirement_change_replans_and_retains_baseline(tmp_path):
     run_dir = tmp_path / "changes" / "dynamic-change-test"
     verification = verify_change_run(run_dir)
     assert verification["passed"] is True
+    assert verification["checks"]["controller_planned_second_phase_without_repeating_baseline"] is True
 
 
 def test_fault_injector_refuses_to_terminate_its_own_process(tmp_path):

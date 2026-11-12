@@ -15,6 +15,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from ..source_revision import describe_source_revision
+
+
+SOURCE_REVISION = describe_source_revision(Path(__file__).resolve())
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -26,7 +31,7 @@ def host_fingerprint() -> str:
 
 
 class WorkerState:
-    def __init__(self, node_id: str, role: str, token: str, delay_seconds: float, event_log: Path):
+    def __init__(self, node_id: str, role: str, token: str, delay_seconds: float, event_log: Path, source_revision: dict):
         if not node_id or role not in {"cloud", "edge"}:
             raise ValueError("node_id is required and role must be cloud or edge")
         if delay_seconds < 0 or delay_seconds > 30:
@@ -36,6 +41,7 @@ class WorkerState:
         self.token = token
         self.delay_seconds = delay_seconds
         self.event_log = event_log
+        self.source_revision = source_revision
         self.lock = threading.Lock()
 
     def emit(self, event: str, **payload: Any) -> None:
@@ -47,6 +53,7 @@ class WorkerState:
             "host": socket.gethostname(),
             "host_fingerprint": host_fingerprint(),
             "pid": os.getpid(),
+            "source_revision": self.source_revision,
             **payload,
         }
         self.event_log.parent.mkdir(parents=True, exist_ok=True)
@@ -79,6 +86,7 @@ def make_handler(state: WorkerState):
                 "role": state.role,
                 "host": socket.gethostname(),
                 "host_fingerprint": host_fingerprint(),
+                "source_revision": state.source_revision,
                 "status": "ready",
                 "time": utc_now(),
             })
@@ -113,6 +121,7 @@ def make_handler(state: WorkerState):
                 "node_role": state.role,
                 "host": socket.gethostname(),
                 "host_fingerprint": host_fingerprint(),
+                "source_revision": state.source_revision,
                 "digest": hashlib.sha256(encoded).hexdigest(),
                 "payload_size_bytes": len(encoded),
             }
@@ -123,7 +132,7 @@ def make_handler(state: WorkerState):
 
 
 def serve(host: str, port: int, node_id: str, role: str, token: str, delay_seconds: float, event_log: Path):
-    state = WorkerState(node_id, role, token, delay_seconds, event_log)
+    state = WorkerState(node_id, role, token, delay_seconds, event_log, SOURCE_REVISION)
     server = ThreadingHTTPServer((host, port), make_handler(state))
     server.daemon_threads = True
     state.emit("worker_started", bind_host=host, port=server.server_address[1], pid=os.getpid())
