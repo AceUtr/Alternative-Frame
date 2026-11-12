@@ -18,6 +18,7 @@ from uuid import uuid4
 from ..acceptance import AcceptanceEvaluator
 from ..agents import Agent, AgentRegistry
 from ..long_horizon import LongHorizonController, LongHorizonStore
+from ..long_horizon.evaluator import GoalEvaluation
 from ..models import AgentResult, Plan, SubTask, utc_now
 from ..orchestrator import Orchestrator
 from ..source_revision import describe_source_revision, sha256_file
@@ -82,6 +83,140 @@ class ReportWriter(Agent):
                 "arguments": {"action": "write", "path": relative},
                 "metadata": {"artifacts": [relative]},
             }],
+        )
+
+
+class FinalReportWriter(Agent):
+    role = "final_report_writer"
+
+    def __init__(self, workspace: Path, evidence_root: Path, run_id: str):
+        self.workspace = workspace
+        self.evidence_root = evidence_root
+        self.run_id = run_id
+
+    def run(self, task: SubTask, context) -> AgentResult:
+        source_path = self.workspace / "artifacts" / "recovered_result.json"
+        try:
+            recovered = json.loads(source_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return AgentResult(task.id, "failed", failures=[f"recovered intermediate artifact unavailable: {type(exc).__name__}"])
+
+        expected_digest = task.metadata.get("expected_remote_digest")
+        if (
+            recovered.get("run_id") != self.run_id
+            or recovered.get("execution_node") != "edge-01"
+            or recovered.get("payload_sha256") != expected_digest
+        ):
+            return AgentResult(task.id, "failed", failures=["recovered intermediate artifact failed final-report validation"])
+
+        framework_path = self.evidence_root / "framework_runs" / self.run_id / "events.jsonl"
+        framework_events = _read_jsonl(framework_path)
+        injector_events = _read_jsonl(self.evidence_root / "injector_events.jsonl")
+        trace_events = [
+            event for event in framework_events
+            if event.get("event") in {
+                "phase_planned", "remote_attempt_failed", "remote_failover",
+                "remote_task_completed", "phase_finished",
+            }
+        ]
+        trace_events.extend(
+            event for event in injector_events
+            if event.get("event") == "fault_injection_triggered"
+        )
+        decision_trace = [
+            {
+                "time": event.get("time") or event.get("injected_at"),
+                "event": event.get("event"),
+                "details": event.get("payload") or {
+                    key: value for key, value in event.items()
+                    if key not in {"time", "event", "_line"}
+                },
+            }
+            for event in sorted(trace_events, key=lambda item: item.get("time") or item.get("injected_at") or "")
+        ]
+        relative = "artifacts/final_report.json"
+        destination = (self.workspace / relative).resolve()
+        if self.workspace.resolve() not in destination.parents:
+            return AgentResult(task.id, "failed", failures=["final artifact path escaped the run workspace"])
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        final_report = {
+            "run_id": self.run_id,
+            "status": "completed",
+            "goal": task.metadata["goal"],
+            "deliverable": {
+                "path": "artifacts/recovered_result.json",
+                "sha256": _sha256(source_path),
+            },
+            "recovery": {
+                "task_id": recovered["task_id"],
+                "execution_node": recovered["execution_node"],
+                "execution_role": recovered["execution_role"],
+                "payload_sha256": recovered["payload_sha256"],
+            },
+            "decision_trace": decision_trace,
+            "acceptance": [
+                "the Cloud task failed after an external process termination",
+                "the same task completed on the Edge worker",
+                "the recovered result passed digest and run identity checks",
+            ],
+            "created_at": utc_now(),
+        }
+        destination.write_text(json.dumps(final_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return AgentResult(
+            subtask_id=task.id,
+            status="success",
+            summary="final report assembled from the verified recovered result and persisted decision trace",
+            artifacts=[relative],
+            evidence=["two-phase completion", "external injection and failover events included", "intermediate artifact retained"],
+            tool_records=[{
+                "tool": "file_editor",
+                "success": True,
+                "arguments": {"action": "write", "path": relative},
+                "metadata": {"artifacts": [relative]},
+            }],
+        )
+
+
+class FaultRecoveryEvaluator:
+    def __init__(self, workspace: Path, run_id: str, expected_digest: str):
+        self.workspace = workspace
+        self.run_id = run_id
+        self.expected_digest = expected_digest
+
+    def evaluate(self, state, plan: Plan, report) -> GoalEvaluation:
+        if report.status != "success":
+            return GoalEvaluation(False, "phase execution failed", failures=list(report.failures))
+        final_path = self.workspace / "artifacts" / "final_report.json"
+        if not final_path.is_file():
+            return GoalEvaluation(
+                False,
+                "recovered intermediate result is valid; final deliverable still needs assembly",
+                missing_criteria=["artifacts/final_report.json"],
+                next_focus=["assemble and verify the final report without repeating recovered work"],
+                evidence=["artifacts/recovered_result.json is available"],
+            )
+        try:
+            final_report = json.loads(final_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return GoalEvaluation(False, "final report is invalid", failures=[type(exc).__name__])
+        completed = (
+            final_report.get("run_id") == self.run_id
+            and final_report.get("status") == "completed"
+            and final_report.get("recovery", {}).get("payload_sha256") == self.expected_digest
+            and final_report.get("recovery", {}).get("execution_node") == "edge-01"
+            and any(event.get("event") == "remote_failover" for event in final_report.get("decision_trace", []))
+        )
+        if completed:
+            return GoalEvaluation(
+                True,
+                "final deliverable and external-failure recovery trace verified",
+                satisfied_criteria=["recovered computation", "final report", "decision trace"],
+                evidence=["final_report.json identifies the recovered Edge result and failover event"],
+            )
+        return GoalEvaluation(
+            False,
+            "final report failed identity, recovery, or decision-trace verification",
+            missing_criteria=["valid final report with recovered result and failover event"],
         )
 
 
@@ -261,12 +396,15 @@ def run_experiment(
             on_event=framework_event,
         ))
         registry.register(ReportWriter(workspace))
+        registry.register(FinalReportWriter(workspace, run_dir, run_id))
         orchestrator = Orchestrator(
             registry,
             acceptance=AcceptanceEvaluator(workspace),
         )
-        plan = Plan(
-            goal="Complete a remote task despite a dynamically injected cloud-node failure and verify the recovered artifact.",
+        goal = "Process the experiment payload on a remote node, recover from an injected failure, and deliver a verified final report."
+        expected_digest = _payload_digest(DEMO_REMOTE_PAYLOAD)
+        initial_plan = Plan(
+            goal="Recover the remote computation and preserve its verified intermediate result.",
             subtasks=[
                 SubTask(
                     "remote_digest",
@@ -275,7 +413,7 @@ def run_experiment(
                     max_retries=0,
                     metadata={
                         "remote_payload": DEMO_REMOTE_PAYLOAD,
-                        "expected_remote_digest": _payload_digest(DEMO_REMOTE_PAYLOAD),
+                        "expected_remote_digest": expected_digest,
                     },
                 ),
                 SubTask(
@@ -285,7 +423,7 @@ def run_experiment(
                     depends_on=["remote_digest"],
                     max_retries=0,
                     metadata={
-                        "expected_remote_digest": _payload_digest(DEMO_REMOTE_PAYLOAD),
+                        "expected_remote_digest": expected_digest,
                         "expected_outputs": ["artifacts/recovered_result.json"],
                         "checks": [{
                             "id": "recovered_result_exists",
@@ -296,21 +434,44 @@ def run_experiment(
                 ),
             ],
         )
+        final_plan = Plan(
+            goal="Assemble the final deliverable from the recovered result and durable decision trace.",
+            subtasks=[
+                SubTask(
+                    "publish_final_report",
+                    "final_report_writer",
+                    "Create the final report after validating the recovered result and recorded failover decisions.",
+                    max_retries=0,
+                    metadata={
+                        "goal": goal,
+                        "expected_remote_digest": expected_digest,
+                        "expected_outputs": ["artifacts/final_report.json"],
+                        "checks": [{
+                            "id": "final_report_exists",
+                            "check_type": "file_exists",
+                            "path": "artifacts/final_report.json",
+                        }],
+                    },
+                ),
+            ],
+        )
         controller = LongHorizonController(
             orchestrator,
-            lambda _state: plan,
+            lambda _state: initial_plan,
             store,
-            max_phases=1,
-            max_total_tasks=4,
+            evaluator=FaultRecoveryEvaluator(workspace, run_id, expected_digest),
+            replanner=lambda _state, _evaluation: final_plan,
+            max_phases=2,
+            max_total_tasks=5,
             on_event=lambda event, payload: None,
             acceptance_contract={
-                "goal": "remote node failure is recovered and verified",
-                "required_artifacts": ["artifacts/recovered_result.json"],
+                "goal": goal,
+                "required_artifacts": ["artifacts/final_report.json"],
             },
             workspace_path=str(workspace),
         )
         report = controller.run(
-            "Complete a remote task despite a dynamically injected cloud-node failure and verify the recovered artifact.",
+            goal,
             run_id=run_id,
         )
         injector_exit = injector_process.wait(timeout=max(10, injection_delay_seconds + 5))
@@ -318,7 +479,8 @@ def run_experiment(
             cloud_process.wait(timeout=2)
         state_path = store.state_path(run_id)
         framework_events = store.run_dir(run_id) / "events.jsonl"
-        artifact = workspace / "artifacts" / "recovered_result.json"
+        intermediate_artifact = workspace / "artifacts" / "recovered_result.json"
+        artifact = workspace / "artifacts" / "final_report.json"
         injector_events = _read_jsonl(injector_log)
         route_events = _read_jsonl(framework_events)
         cloud_events = _read_jsonl(cloud_event_path)
@@ -333,7 +495,11 @@ def run_experiment(
         cloud_attempt_task_id = cloud_attempt_failed.get("payload", {}).get("task_id") if cloud_attempt_failed else None
         edge_task_id = edge_completed.get("payload", {}).get("task_id") if edge_completed else None
         state = store.load(run_id)
+        intermediate_result = json.loads(intermediate_artifact.read_text(encoding="utf-8")) if intermediate_artifact.is_file() else {}
         artifact_result = json.loads(artifact.read_text(encoding="utf-8")) if artifact.is_file() else {}
+        phase_one = next((phase for phase in state.phases if phase.number == 1), None)
+        phase_two = next((phase for phase in state.phases if phase.number == 2), None)
+        final_trace_events = {event.get("event") for event in artifact_result.get("decision_trace", [])}
         checks = {
             "injector_triggered": injected is not None and injector_exit == 0,
             "injected_task_identity_matches": bool(
@@ -358,13 +524,27 @@ def run_experiment(
             "framework_failed_over_to_edge": failover is not None,
             "edge_completed_remote_task": bool(edge_completed and edge_task_id == actual_task_id),
             "long_horizon_controller_completed": report.status == "completed" and state.status == "completed",
+            "phase_one_preserved_recovered_result": bool(
+                phase_one and phase_one.status == "incomplete"
+                and "artifacts/final_report.json" in phase_one.evaluation.get("missing_criteria", [])
+                and intermediate_artifact.is_file()
+            ),
+            "phase_two_completed_final_delivery": bool(
+                phase_two and phase_two.status == "accepted"
+                and phase_two.task_ids == ["publish_final_report"]
+            ),
+            "controller_completed_two_phases": len(state.phases) == 2 and state.phase == 2,
             "required_artifact_exists": artifact.is_file(),
-            "artifact_records_edge_execution": artifact_result.get("execution_node") == "edge-01",
-            "artifact_digest_matches_task_input": artifact_result.get("payload_sha256") == _payload_digest(DEMO_REMOTE_PAYLOAD),
+            "artifact_records_edge_execution": artifact_result.get("recovery", {}).get("execution_node") == "edge-01",
+            "artifact_digest_matches_task_input": artifact_result.get("recovery", {}).get("payload_sha256") == expected_digest,
+            "decision_trace_records_injection_and_failover": {
+                "fault_injection_triggered", "remote_failover", "remote_task_completed"
+            }.issubset(final_trace_events),
         }
         verification_passed = all(checks.values())
         summary = {
             "run_id": run_id,
+            "evidence_schema_version": 2,
             "generated_at": utc_now(),
             "evidence_kind": "controlled_external_process_fault_injection",
             "source_revision": _git_revision(),
@@ -391,19 +571,22 @@ def run_experiment(
             "edge_worker_events_path": str(edge_event_path.relative_to(run_dir)) if edge_event_path else "edge_worker_events.jsonl (copy from Edge host after run)",
             "artifact_path": str(artifact.relative_to(run_dir)) if artifact.is_file() else None,
             "artifact_sha256": _sha256(artifact) if artifact.is_file() else None,
-            "expected_payload_sha256": _payload_digest(DEMO_REMOTE_PAYLOAD),
+            "intermediate_artifact_path": str(intermediate_artifact.relative_to(run_dir)) if intermediate_artifact.is_file() else None,
+            "intermediate_artifact_sha256": _sha256(intermediate_artifact) if intermediate_artifact.is_file() else None,
+            "decision_trace_path": str(framework_events.relative_to(run_dir)),
+            "expected_payload_sha256": expected_digest,
             "checks": checks,
             "verification_passed": verification_passed,
             "evidence_bundle_status": "complete_for_loopback_control" if local_edge else "awaiting_copied_edge_worker_events_for_final_verification",
             "claim_boundary": (
-                "Local process-level integration only; does not prove a second physical host."
+                "Deterministic two-phase control on one host; proves main-controller recovery, final delivery, and persisted decision events, not arbitrary LLM planning or a second physical host."
                 if local_edge else
-                "Execution reached the separately configured Edge endpoint. This is not a cross-host acceptance until the copied Edge event log passes core.edge_cloud.evidence."
+                "Deterministic two-phase control reached the separately configured Edge endpoint. This is not a cross-host acceptance until the copied Edge event log passes core.edge_cloud.evidence."
             ),
         }
         summary_path = run_dir / "summary.json"
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        manifest_paths = [injector_log, framework_events, cloud_event_path, state_path, artifact, summary_path]
+        manifest_paths = [injector_log, framework_events, cloud_event_path, state_path, intermediate_artifact, artifact, summary_path]
         if edge_event_path:
             manifest_paths.append(edge_event_path)
         manifest_paths.extend([run_dir / "cloud_worker_stdout.log", run_dir / "injector_stdout.log"])

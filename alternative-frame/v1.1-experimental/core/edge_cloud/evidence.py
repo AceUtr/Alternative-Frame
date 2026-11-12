@@ -214,6 +214,107 @@ def verify_run(
         and edge_digest == expected_digest and worker_digest == expected_digest
     ), "artifact digest does not match the expected input and both Edge execution records")
 
+    if (summary or {}).get("evidence_schema_version", 1) >= 2:
+        phase_planned = [
+            item for item in framework
+            if item.get("event") == "phase_planned" and same_run(item)
+        ]
+        phase_finished = [
+            item for item in framework
+            if item.get("event") == "phase_finished" and same_run(item)
+        ]
+        planned_by_number = {
+            _payload(item).get("phase"): item for item in phase_planned
+        }
+        finished_by_number = {
+            _payload(item).get("phase"): item for item in phase_finished
+        }
+        state_phases = (state or {}).get("phases", [])
+        state_phase_one = next((item for item in state_phases if item.get("number") == 1), {})
+        state_phase_two = next((item for item in state_phases if item.get("number") == 2), {})
+        phase_one_eval = state_phase_one.get("evaluation", {})
+        phase_two_eval = state_phase_two.get("evaluation", {})
+        phase_one_plan = _payload(planned_by_number[1]).get("tasks", []) if 1 in planned_by_number else []
+        phase_two_plan = _payload(planned_by_number[2]).get("tasks", []) if 2 in planned_by_number else []
+        phase_one_finish_line = finished_by_number.get(1, {}).get("_line", 0)
+        phase_two_plan_line = planned_by_number.get(2, {}).get("_line", 0)
+        final_rel = (summary or {}).get("artifact_path")
+        final_path = root / str(final_rel) if final_rel else root / "__missing_final_artifact__"
+        try:
+            final_path.resolve().relative_to(root)
+            final_in_bundle = True
+        except ValueError:
+            final_in_bundle = False
+            failures.append("final artifact path escapes the evidence directory")
+        final_report = _read_json(final_path) if final_in_bundle else None
+        intermediate_rel = (summary or {}).get("intermediate_artifact_path")
+        intermediate_path = root / str(intermediate_rel) if intermediate_rel else root / "__missing_intermediate_artifact__"
+        try:
+            intermediate_path.resolve().relative_to(root)
+            intermediate_in_bundle = True
+        except ValueError:
+            intermediate_in_bundle = False
+            failures.append("intermediate artifact path escapes the evidence directory")
+        intermediate_hash = (
+            _sha256(intermediate_path)
+            if intermediate_in_bundle and intermediate_path.is_file() else None
+        )
+        report_recovery = (final_report or {}).get("recovery", {})
+        report_trace = {
+            event.get("event"): event
+            for event in (final_report or {}).get("decision_trace", [])
+            if isinstance(event, dict)
+        }
+        runtime_trace = {
+            item.get("event") for item in framework + injector if same_run(item)
+        }
+        check("two_phase_controller_completion", bool(
+            summary.get("phase_count") == 2
+            and isinstance(state, dict) and state.get("phase") == 2 and state.get("status") == "completed"
+            and {1, 2}.issubset(planned_by_number)
+            and {1, 2}.issubset(finished_by_number)
+            and phase_one_finish_line < phase_two_plan_line
+        ), "two ordered phases and completed controller state are required")
+        check("phase_one_replanned_for_final_delivery", bool(
+            state_phase_one.get("status") == "incomplete"
+            and phase_one_eval.get("completed") is False
+            and "artifacts/final_report.json" in phase_one_eval.get("missing_criteria", [])
+            and {item.get("id") for item in phase_one_plan} >= {"remote_digest", "write_report"}
+            and [item.get("id") for item in phase_two_plan] == ["publish_final_report"]
+        ), "phase 1 must retain recovered work and request a distinct final-delivery phase")
+        check("phase_two_final_delivery_accepted", bool(
+            state_phase_two.get("status") == "accepted"
+            and phase_two_eval.get("completed") is True
+            and _payload(finished_by_number.get(2, {})).get("completed") is True
+        ), "phase 2 final delivery was not accepted by the controller")
+        check("final_artifact_exists_and_matches_manifest_claim", bool(
+            final_report and final_report.get("run_id") == run_id
+            and final_report.get("status") == "completed"
+            and (summary or {}).get("artifact_sha256")
+            and _sha256(final_path) == (summary or {}).get("artifact_sha256")
+        ), "final report is missing, incomplete, or its SHA-256 differs from summary.json")
+        check("final_artifact_proves_recovered_intermediate", bool(
+            final_report and intermediate_hash
+            and (final_report.get("deliverable") or {}).get("path") == "artifacts/recovered_result.json"
+            and (final_report.get("deliverable") or {}).get("sha256") == intermediate_hash
+            and report_recovery.get("task_id") == cloud_task_id
+            and report_recovery.get("execution_node") == "edge-01"
+            and report_recovery.get("payload_sha256") == expected_digest
+            and (summary or {}).get("intermediate_artifact_sha256") == intermediate_hash
+        ), "final report does not bind the recovered task, Edge result, and retained intermediate artifact")
+        required_trace = {"fault_injection_triggered", "remote_failover", "remote_task_completed"}
+        check("final_artifact_contains_runtime_decision_trace", bool(
+            required_trace.issubset(report_trace)
+            and required_trace.issubset(runtime_trace)
+            and report_trace.get("fault_injection_triggered", {}).get("time") == (triggered or {}).get("time")
+            and ((report_trace.get("fault_injection_triggered", {}).get("details") or {}).get("injected_at") == injected_at)
+            and report_trace.get("remote_failover", {}).get("time") == (failover or {}).get("time")
+            and report_trace.get("remote_task_completed", {}).get("time") == (edge_finished or {}).get("time")
+            and (report_trace.get("remote_failover", {}).get("details") or {}).get("task_id") == cloud_task_id
+            and (report_trace.get("remote_task_completed", {}).get("details") or {}).get("task_id") == cloud_task_id
+            and (summary or {}).get("decision_trace_path")
+        ), "final report decision trace is incomplete or does not match runtime evidence")
+
     if require_edge_log and not edge:
         failures.append("edge_worker_events.jsonl is required for the final bundle but was not supplied")
         checks["edge_log_present"] = False

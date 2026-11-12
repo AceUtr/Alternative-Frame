@@ -2,12 +2,12 @@
 
 This acceptance adds two independently injected runtime scenarios to the main `AgentRegistry` → `Orchestrator` → `LongHorizonController` path:
 
-1. A separate process waits until the Cloud worker has started a specific task, then terminates that worker. The controller must detect the transport failure, retry the same task on Edge, continue the dependent artifact task, and finish without a human pause or resume.
+1. A separate process waits until the Cloud worker has started a specific task, then terminates that worker. The controller must detect the transport failure, retry the same task on Edge, preserve and verify the intermediate result, recognize that final packaging is still missing, replan phase 2, and finish the final deliverable without a human pause or resume.
 2. A separate process waits until the baseline artifact is complete, then writes a new acceptance criterion into the run-scoped inbox. The controller detects the change, produces a second-phase plan, preserves the baseline artifact, and satisfies the added criterion.
 
-Neither worker has an internal fault-mode flag. The injected event is not passed into the controller. The demo exercises deterministic digest and report agents; it does not prove model-generated interpretation, provider resilience, or production availability.
+Neither worker has an internal fault-mode flag. The injected event is not passed into the controller. The fault demo exercises deterministic digest and report agents; it proves the main controller's two-phase recovery and delivery path, but not model-generated task planning, provider resilience, or production availability. The saved final report includes the injector, routing, phase-review, and task-completion events so the intermediate decisions can be reviewed.
 
-The official PDF was not present in this workspace at the time of implementation. The quoted clause and scenario interpretation therefore follow `动态异常注入改造任务书_交Codex.md`; before making an official compliance claim, compare the wording with the organizer's original competition document.
+The organizer's competition PDF was located in the supplied chat-file archive. Clause 5/e, printed page 5, says the deployable system must accept dynamically injected exceptions, requirement changes, or node failures, autonomously complete the full chain from high-level intent to final deliverable without human intervention, and show intermediate decisions and reasoning traces. This acceptance covers external process failure and requirement-change controls; both demos remain deterministic and do not claim arbitrary LLM interpretation.
 
 ## Local Process-Fault Control
 
@@ -17,7 +17,7 @@ From `alternative-frame/v1.1-experimental`, run:
 python -m core.edge_cloud.demo --evidence-dir runs/dynamic_fault_injection --inject-delay-seconds 0.8 --cloud-delay-seconds 5 --cloud-timeout-seconds 2.5
 ```
 
-The independent injector waits for `worker_task_started` for `remote_digest`, waits the configured interval, then terminates the Cloud PID recorded by the worker. This is a same-computer loopback control, not a multi-device result.
+The independent injector waits for `worker_task_started` for `remote_digest`, waits the configured interval, then terminates the Cloud PID recorded by the worker. Phase 1 recovers the remote computation and writes `recovered_result.json`; the goal evaluator records that `final_report.json` is still missing and triggers phase 2, which assembles the final deliverable from the retained result and runtime decision trace. This is a same-computer loopback control, not a multi-device result.
 
 The runner exits nonzero unless its execution checks pass. Verify the saved raw evidence separately:
 
@@ -25,7 +25,7 @@ The runner exits nonzero unless its execution checks pass. Verify the saved raw 
 python -m core.edge_cloud.evidence runs/dynamic_fault_injection/<run-id> --output runs/dynamic_fault_injection/<run-id>/acceptance_verification.json
 ```
 
-The verifier reconstructs run/task identity and event ordering, checks that Cloud started but did not finish the task, checks the same task failed over and completed on Edge, confirms both workers ran the same source commit and working-tree fingerprint, audits controller and artifact state, and verifies manifest size/hash records. The output warns when both nodes have the same host identity.
+The verifier reconstructs run/task identity and event ordering, checks that Cloud started but did not finish the task, checks the same task failed over and completed on Edge, confirms both workers ran the same source commit and working-tree fingerprint, verifies the incomplete phase-1 review and accepted phase-2 delivery, binds the final report to the intermediate artifact hash and runtime decision trace, and verifies manifest size/hash records. The output warns when both nodes have the same host identity.
 
 ## Dynamic Requirement-Change Control
 
@@ -86,6 +86,7 @@ Fault-run directory:
 - `cloud_worker_events.jsonl`: Cloud process and request start; the injected request must have no finish event.
 - `edge_worker_events.jsonl`: local Edge records, or the copied run-specific log from B.
 - `workspace/artifacts/recovered_result.json`: output with run/task/node identity and digest.
+- `workspace/artifacts/final_report.json`: final deliverable with the retained intermediate artifact hash and the externally injected failure/failover decision trace.
 - `summary.json`, `manifest.json`, and `acceptance_verification.json`: execution summary, source revision/dirty-tree fingerprint, file hashes, and independently reconstructed checks.
 
 Requirement-change directory:
@@ -96,7 +97,7 @@ Requirement-change directory:
 - `workspace/artifacts/baseline_report.json` and `revised_report.json`: original and adapted deliverables.
 - `manifest.json`: run-scoped file hashes and byte counts.
 
-The single-host run proves the framework's in-process routing/recovery path under an external process failure. The separate requirement-change run proves deterministic re-planning and prior-artifact retention. Only a successful `--require-cross-host --require-edge-log` verification on the actual two-computer bundle supports a cross-host demonstration claim. Neither scenario establishes recovery from every possible failure or guarantees completion when the fallback node, network, or required service is unavailable.
+The single-host run proves the framework's in-process routing/recovery path under an external process failure, followed by a separately evaluated final-delivery phase. The separate requirement-change run proves deterministic re-planning and prior-artifact retention. Both runs are fixed-agent controls; they do not establish model-generated interpretation of arbitrary user intent or requirement changes. Only a successful `--require-cross-host --require-edge-log` verification on the actual two-computer bundle supports a cross-host demonstration claim. Neither scenario establishes recovery from every possible failure or guarantees completion when the fallback node, network, or required service is unavailable.
 
 ## Legacy Evidence
 

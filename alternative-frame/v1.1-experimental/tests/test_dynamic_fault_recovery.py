@@ -38,9 +38,14 @@ def test_external_process_failure_recovers_inside_main_long_horizon_controller(t
     assert summary["checks"]["framework_failed_over_to_edge"] is True
     assert summary["checks"]["edge_completed_remote_task"] is True
     assert summary["checks"]["long_horizon_controller_completed"] is True
+    assert summary["phase_count"] == 2
+    assert summary["checks"]["phase_one_preserved_recovered_result"] is True
+    assert summary["checks"]["phase_two_completed_final_delivery"] is True
+    assert summary["checks"]["controller_completed_two_phases"] is True
     assert summary["checks"]["required_artifact_exists"] is True
     assert summary["checks"]["artifact_records_edge_execution"] is True
     assert summary["checks"]["artifact_digest_matches_task_input"] is True
+    assert summary["checks"]["decision_trace_records_injection_and_failover"] is True
 
     run_dir = tmp_path / "evidence" / f"fault-recovery-test-{str(injection_delay).replace('.', '-')}"
     framework_events = read_jsonl(run_dir / summary["framework_events_path"])
@@ -54,6 +59,12 @@ def test_external_process_failure_recovers_inside_main_long_horizon_controller(t
 
     artifact = run_dir / summary["artifact_path"]
     assert hashlib.sha256(artifact.read_bytes()).hexdigest() == summary["artifact_sha256"]
+    final_report = json.loads(artifact.read_text(encoding="utf-8"))
+    assert final_report["recovery"]["execution_node"] == "edge-01"
+    assert final_report["deliverable"]["path"] == "artifacts/recovered_result.json"
+    assert {event["event"] for event in final_report["decision_trace"]} >= {
+        "fault_injection_triggered", "remote_failover", "remote_task_completed"
+    }
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     for record in manifest["files"]:
         path = run_dir / record["path"]
@@ -85,6 +96,24 @@ def test_independent_verifier_rejects_tampered_edge_log(tmp_path):
 
     verification = verify_run(run_dir)
     assert verification.passed is False
+    assert verification.checks["manifest_hashes_valid"] is False
+
+
+def test_independent_verifier_rejects_tampered_final_deliverable(tmp_path):
+    run_experiment(
+        tmp_path / "evidence",
+        run_id="fault-recovery-final-report-tamper-test",
+        injection_delay_seconds=0.7,
+        cloud_delay_seconds=4,
+        cloud_timeout_seconds=2.5,
+    )
+    run_dir = tmp_path / "evidence" / "fault-recovery-final-report-tamper-test"
+    final_report = run_dir / "workspace" / "artifacts" / "final_report.json"
+    final_report.write_text(final_report.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    verification = verify_run(run_dir)
+    assert verification.passed is False
+    assert verification.checks["final_artifact_exists_and_matches_manifest_claim"] is False
     assert verification.checks["manifest_hashes_valid"] is False
 
 
