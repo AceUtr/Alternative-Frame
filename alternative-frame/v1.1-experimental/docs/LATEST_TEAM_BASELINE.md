@@ -1,18 +1,30 @@
 # Latest team baseline
 
-Branch: `codex/v1.1-longrun-reliability`
-Project directory: `alternative-frame/v1.1-experimental`
+Updated: 2026-11-13 (Asia/Shanghai).
+Shared branch: codex/dynamic-fault-recovery.
+Repository: https://github.com/AceUtr/Alternative-Frame
+Project directory: alternative-frame/v1.1-experimental.
 
-This branch publishes the latest long-horizon reliability fixes, task workspace isolation, API accounting, Windows tool execution fixes, UI limits and regression tests.
+Save existing work before switching branches. For a new checkout:
 
-## Getting started
+    git clone --branch codex/dynamic-fault-recovery https://github.com/AceUtr/Alternative-Frame.git
+    cd Alternative-Frame/alternative-frame/v1.1-experimental
+    python ui.py
 
-Fetch origin and check out this branch in a clean checkout. Run `python ui.py` from the project directory, or use the Chinese-named UI launcher batch file. Python 3 with tkinter is required. Configure your own API endpoint, model and key in the UI. No shared API credentials are included.
+Python 3.10+ with tkinter is required. Windows users may double-click 启动长程任务UI.bat. Configure API credentials in the UI; none are shipped.
 
-## Validation and boundaries
+This branch includes optional runtime plugins and dynamic fault recovery. Implementation commit 831a10b980f0de8bdb6ac4009bc373b66daebbf2 passed 233 tests in the archived local run. This documentation publication is not a new full-test run.
 
-The local working tree regression recorded 190 passes and one requirements-document acceptance failure. The local requirements.md was a historical generated task document and is deliberately excluded from this publication; the repository baseline document is retained. These local results are not a fresh-clone certification of this commit. The reliability-related regression subset passed 64 tests.
+External process termination and runtime requirement changes have controlled local evidence. Real cross-host acceptance and real API A/B remain pending. Edge worker computes SHA-256 only, with no LLM/API inference. The deterministic 311-to-5 result is not real API usage evidence.
 
-A live run generated a research evidence management web application and its 25 tests passed independently. Browser interaction acceptance remains incomplete. Model semantic acceptance is not equivalent to verified browser interaction. No universal task completion guarantee is made.
+Instructions:
+- [API A/B task](真实API通信A-B实验任务书.md)
+- [Important A/B implementation notes](API_AB_EXECUTION_NOTES.md)
+- [Cross-host manual](双机复验操作手册.md)
+- [Runtime plugins](OPTIONAL_PLUGINS.md)
+- [Fault injection](dynamic-fault-injection.md)
+- [Runtime changes](dynamic_runtime_changes.md)
 
-Runtime directories, local API configurations, generated calculator/research products, caches, local evidence and changes to v0.1 are excluded. Original competition tags are unchanged. Team members should branch from this baseline for new work and keep their existing work before switching branches.
+The cross-host ZIP is a separate local delivery, not included in Git. Obtain it from the lead before following that manual. Preserve its fixed commit and configuration.
+
+Create individual branches from this shared branch for new work. Existing competition tags remain unchanged. Secrets, runtime workspaces, caches and historical products are excluded.
